@@ -1,0 +1,87 @@
+package require tcltest
+namespace import ::tcltest::*
+
+set here [file dirname [file normalize [info script]]]
+set root [file dirname $here]
+tcl::tm::path add [file join $root lib tm]
+tcl::tm::path add [file join $root .. tclutils lib tm]
+
+package require ctrlutils::cumonitor
+package require tclutils::tuprovider
+
+# a scratch directory to watch
+set ::wdir [makeDirectory cumon]
+proc touchFile {name} {
+    set p [file join $::wdir $name]
+    set fh [open $p w] ; puts $fh x ; close $fh
+    return $p
+}
+
+test cumonitor-1.1 {install and watch take a baseline without firing} -setup {
+    set ::fired 0
+    set prov [::tclutils::tuprovider open local]
+    ::ctrlutils::cumonitor::install t1 $prov -interval 200 \
+        -onchange {apply {{dir} {incr ::fired}}}
+} -body {
+    touchFile a.txt
+    ::ctrlutils::cumonitor::watch t1 $::wdir
+    # baseline just taken; nothing should have fired
+    set ::fired
+} -cleanup {
+    ::ctrlutils::cumonitor::stop t1
+} -result 0
+
+test cumonitor-1.2 {an external change fires the callback} -setup {
+    set ::fired 0 ; set ::seen ""
+    set prov [::tclutils::tuprovider open local]
+    ::ctrlutils::cumonitor::install t2 $prov -interval 150 \
+        -onchange {apply {{dir} {incr ::fired ; set ::seen $dir}}}
+    ::ctrlutils::cumonitor::watch t2 $::wdir
+} -body {
+    touchFile new.txt
+    after 450 {set ::go 1} ; vwait ::go
+    list [expr {$::fired >= 1}] [expr {$::seen eq $::wdir}]
+} -cleanup {
+    ::ctrlutils::cumonitor::stop t2
+    file delete [file join $::wdir new.txt]
+} -result {1 1}
+
+test cumonitor-1.3 {no change means no fire} -setup {
+    set ::fired 0
+    set prov [::tclutils::tuprovider open local]
+    ::ctrlutils::cumonitor::install t3 $prov -interval 150 \
+        -onchange {apply {{dir} {incr ::fired}}}
+    ::ctrlutils::cumonitor::watch t3 $::wdir
+} -body {
+    after 450 {set ::go 1} ; vwait ::go
+    set ::fired
+} -cleanup {
+    ::ctrlutils::cumonitor::stop t3
+} -result 0
+
+test cumonitor-1.4 {poke re-baselines without firing} -setup {
+    set ::fired 0
+    set prov [::tclutils::tuprovider open local]
+    ::ctrlutils::cumonitor::install t4 $prov -interval 150 \
+        -onchange {apply {{dir} {incr ::fired}}}
+    ::ctrlutils::cumonitor::watch t4 $::wdir
+} -body {
+    touchFile poke.txt
+    ::ctrlutils::cumonitor::poke t4   ;# absorb the change silently
+    after 450 {set ::go 1} ; vwait ::go
+    set ::fired
+} -cleanup {
+    ::ctrlutils::cumonitor::stop t4
+    file delete [file join $::wdir poke.txt]
+} -result 0
+
+test cumonitor-1.5 {stop removes state} -body {
+    set prov [::tclutils::tuprovider open local]
+    ::ctrlutils::cumonitor::install t5 $prov
+    ::ctrlutils::cumonitor::stop t5
+    # a second stop on unknown token is a no-op, not an error
+    ::ctrlutils::cumonitor::stop t5
+    set r ok
+} -result ok
+
+cleanupTests

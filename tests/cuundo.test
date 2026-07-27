@@ -1,0 +1,133 @@
+package require tcltest
+namespace import ::tcltest::*
+
+set here [file dirname [file normalize [info script]]]
+set root [file dirname $here]
+tcl::tm::path add [file join $root lib tm]
+tcl::tm::path add [file join $root .. tclutils lib tm]
+
+package require ctrlutils::cuundo
+package require tclutils::tuprovider
+
+# Undo/redo can be exercised headlessly: cuundo reverses through the provider,
+# no widgets needed. We drive cufileops' operation records directly via the
+# -onop path by calling cuundo::record, and check the filesystem effect.
+
+set dir [makeDirectory undo]
+proc prov {} { ::tclutils::tuprovider open local }
+proc exists {p} { file exists $p }
+
+test cuundo-1.1 {undo of mkdir removes the directory} -setup {
+    set p [prov]
+    ::ctrlutils::cuundo::install t1 $p
+} -body {
+    set d [file join $::dir made]
+    $p mkdir $d
+    ::ctrlutils::cuundo::record t1 [dict create op mkdir path $d]
+    set before [exists $d]
+    ::ctrlutils::cuundo::undo t1
+    list $before [exists $d]
+} -cleanup {
+    ::ctrlutils::cuundo::clear t1
+    catch {file delete -force [file join $::dir made]}
+} -result {1 0}
+
+test cuundo-1.2 {redo of mkdir re-creates it} -setup {
+    set p [prov]
+    ::ctrlutils::cuundo::install t2 $p
+} -body {
+    set d [file join $::dir made2]
+    $p mkdir $d
+    ::ctrlutils::cuundo::record t2 [dict create op mkdir path $d]
+    ::ctrlutils::cuundo::undo t2
+    ::ctrlutils::cuundo::redo t2
+    exists $d
+} -cleanup {
+    ::ctrlutils::cuundo::clear t2
+    catch {file delete -force [file join $::dir made2]}
+} -result 1
+
+test cuundo-1.3 {undo of rename moves it back} -setup {
+    set p [prov]
+    ::ctrlutils::cuundo::install t3 $p
+    set fh [open [file join $::dir a.txt] w] ; puts $fh hi ; close $fh
+} -body {
+    set from [file join $::dir a.txt]
+    set to   [file join $::dir b.txt]
+    $p move $from $to
+    ::ctrlutils::cuundo::record t3 [dict create op rename from $from to $to type file]
+    set afterMove [list [exists $from] [exists $to]]
+    ::ctrlutils::cuundo::undo t3
+    concat $afterMove [list [exists $from] [exists $to]]
+} -cleanup {
+    ::ctrlutils::cuundo::clear t3
+    catch {file delete [file join $::dir a.txt] [file join $::dir b.txt]}
+} -result {0 1 1 0}
+
+test cuundo-1.4 {undo of delete restores a file with its content} -setup {
+    set p [prov]
+    ::ctrlutils::cuundo::install t4 $p
+    set fh [open [file join $::dir doc.txt] w] ; puts -nonewline $fh "important" ; close $fh
+} -body {
+    set path [file join $::dir doc.txt]
+    # snapshot before delete (as cufileops::delete does), then delete
+    set snap [::ctrlutils::cuundo::_snapshot $p $path file]
+    $p delete $path
+    ::ctrlutils::cuundo::record t4 [dict create op delete path $path type file saved $snap]
+    set gone [exists $path]
+    ::ctrlutils::cuundo::undo t4
+    set back [exists $path]
+    set fh [open $path] ; set content [read $fh] ; close $fh
+    list $gone $back $content
+} -cleanup {
+    ::ctrlutils::cuundo::clear t4
+    catch {file delete [file join $::dir doc.txt]}
+} -result {0 1 important}
+
+test cuundo-1.5 {undo of delete restores a whole directory tree} -setup {
+    set p [prov]
+    ::ctrlutils::cuundo::install t5 $p
+    set d [file join $::dir tree]
+    file mkdir [file join $d sub]
+    set fh [open [file join $d top.txt] w] ; puts -nonewline $fh T ; close $fh
+    set fh [open [file join $d sub inner.txt] w] ; puts -nonewline $fh I ; close $fh
+} -body {
+    set d [file join $::dir tree]
+    set snap [::ctrlutils::cuundo::_snapshot $p $d dir]
+    $p delete $d
+    ::ctrlutils::cuundo::record t5 [dict create op delete path $d type dir saved $snap]
+    ::ctrlutils::cuundo::undo t5
+    list [exists [file join $d top.txt]] [exists [file join $d sub inner.txt]]
+} -cleanup {
+    ::ctrlutils::cuundo::clear t5
+    catch {file delete -force [file join $::dir tree]}
+} -result {1 1}
+
+test cuundo-1.6 {new activity clears the redo stack} -setup {
+    set p [prov]
+    ::ctrlutils::cuundo::install t6 $p
+} -body {
+    set d [file join $::dir x]
+    $p mkdir $d
+    ::ctrlutils::cuundo::record t6 [dict create op mkdir path $d]
+    ::ctrlutils::cuundo::undo t6                 ;# redo now available
+    set r1 [::ctrlutils::cuundo::canRedo t6]
+    ::ctrlutils::cuundo::record t6 [dict create op mkdir path [file join $::dir y]]
+    set r2 [::ctrlutils::cuundo::canRedo t6]     ;# cleared by new record
+    list $r1 $r2
+} -cleanup {
+    ::ctrlutils::cuundo::clear t6
+    catch {file delete -force [file join $::dir x] [file join $::dir y]}
+} -result {1 0}
+
+test cuundo-1.7 {undo on an empty stack is a no-op} -setup {
+    set p [prov]
+    ::ctrlutils::cuundo::install t7 $p
+} -body {
+    ::ctrlutils::cuundo::undo t7
+    ::ctrlutils::cuundo::canUndo t7
+} -cleanup {
+    ::ctrlutils::cuundo::clear t7
+} -result 0
+
+cleanupTests

@@ -1,0 +1,133 @@
+package require tcltest
+namespace import ::tcltest::*
+
+set here [file dirname [file normalize [info script]]]
+set root [file dirname $here]
+tcl::tm::path add [file join $root lib tm]
+tcl::tm::path add [file join $root .. tclutils lib tm]
+tcl::tm::path add [file join $root .. tkutils lib tm]
+
+# cufileops is GUI code (it uses a context menu and dialogs), so it can only be
+# loaded when Tk is present. Gate the load behind the Tk constraint so a
+# headless "tclsh some.test" run skips these tests cleanly instead of erroring
+# out at load time.
+if {![catch {package require Tk}]
+ && ![catch {package require ctrlutils::cufileops}]
+ && ![catch {package require tkutils::tkufilelist}]} {
+    testConstraint haveTk 1
+} else {
+    testConstraint haveTk 0
+}
+package require tclutils::tuprovider
+
+# A tiny read-only in-memory provider, defined inline so the cross-provider
+# tests do not depend on the ZIP provider (or any other) being installed.
+# cufileops only calls methods on the provider object, so this is enough to
+# stand in as a "different provider" source: get for a file, list for a dir.
+# (An earlier version required the zip provider and swallowed the load failure
+# with catch -- which passed locally but failed on a clean checkout with
+# "unknown scheme 'zip'". This inline provider removes that dependency.)
+oo::class create MemSource {
+    variable Files
+    constructor {files} { set Files $files }
+    method caps {} { return {list stat get} }
+    method get {path} {
+        if {![dict exists $Files $path]} { error "no such file: $path" }
+        return [dict get $Files $path]
+    }
+    method stat {path} {
+        if {![dict exists $Files $path]} { error "no such file: $path" }
+        return [dict create name [file tail $path] path $path type file \
+                    size [string length [dict get $Files $path]]]
+    }
+    method list {dir} {
+        set out {}
+        dict for {p c} $Files {
+            lappend out [dict create name [file tail $p] path $p type file \
+                             size [string length $c]]
+        }
+        return $out
+    }
+}
+
+set ::tgt [makeDirectory cufops]
+
+test cufileops-2.1 {install wires the list without error} -constraints haveTk -setup {
+    set prov [::tclutils::tuprovider open local]
+    ::tkutils::tkufilelist::widget .fl -provider $prov -dir $::tgt
+} -body {
+    ::ctrlutils::cufileops::install tabA $prov .fl {}
+    expr {[bind .fl.tbl.body <Button-3>] ne "" \
+       && [bind .fl.tbl.body <Delete>]  ne ""}
+} -cleanup {
+    destroy .fl
+} -result 1
+
+test cufileops-2.2 {cross-provider copy: in-memory source to local target} -constraints haveTk -setup {
+    set src [MemSource new {/doc.txt {content from the source}}]
+    set lp  [::tclutils::tuprovider open local]
+    ::tkutils::tkufilelist::widget .zl -provider $src -dir /
+    ::tkutils::tkufilelist::widget .ll -provider $lp  -dir $::tgt
+    ::ctrlutils::cufileops::install zTab $src .zl {}
+    ::ctrlutils::cufileops::install lTab $lp  .ll {}
+} -body {
+    ::ctrlutils::cufileops::copy zTab \
+        [dict create name doc.txt path /doc.txt type file size 22]
+    ::ctrlutils::cufileops::paste lTab
+    set out [glob -nocomplain -tails -directory $::tgt *]
+    set fh [open [file join $::tgt doc.txt]] ; set data [read $fh] ; close $fh
+    list [lsearch -inline $out doc.txt] [string trim $data]
+} -cleanup {
+    destroy .zl .ll
+    $src destroy
+    catch {file delete [file join $::tgt doc.txt]}
+} -result {doc.txt {content from the source}}
+
+test cufileops-2.3 {paste collision picks a (copy) name} -constraints haveTk -setup {
+    set fh [open [file join $::tgt doc.txt] w] ; puts $fh existing ; close $fh
+    set src [MemSource new {/doc.txt {content from the source}}]
+    set lp  [::tclutils::tuprovider open local]
+    ::tkutils::tkufilelist::widget .zl2 -provider $src -dir /
+    ::tkutils::tkufilelist::widget .ll2 -provider $lp  -dir $::tgt
+    ::ctrlutils::cufileops::install zT2 $src .zl2 {}
+    ::ctrlutils::cufileops::install lT2 $lp  .ll2 {}
+} -body {
+    ::ctrlutils::cufileops::copy zT2 \
+        [dict create name doc.txt path /doc.txt type file size 22]
+    ::ctrlutils::cufileops::paste lT2
+    expr {[file exists [file join $::tgt doc.txt]]
+       && [file exists [file join $::tgt {doc (copy).txt}]]}
+} -cleanup {
+    destroy .zl2 .ll2
+    $src destroy
+    catch {file delete [file join $::tgt doc.txt]}
+    catch {file delete [file join $::tgt {doc (copy).txt}]}
+} -result 1
+
+
+test cufileops-2.1 {_localPath returns a local file path as-is} -constraints haveTk -setup {
+    set d [makeDirectory ow]
+    set fh [open [file join $d a.txt] w] ; puts -nonewline $fh hi ; close $fh
+} -body {
+    set entry [dict create name a.txt path [file join $d a.txt] type file size 2]
+    set lp [::ctrlutils::cufileops::_localPath any $entry]
+    string equal $lp [file join $d a.txt]
+} -cleanup {
+    catch {file delete [file join $d a.txt]}
+} -result 1
+
+test cufileops-2.2 {_localPath materializes provider bytes to a temp file} -constraints haveTk -setup {
+    proc ::testprov {method args} { if {$method eq "get"} { return "BYTES" } }
+    namespace eval ::ctrlutils::cufileops { variable state }
+    set ::ctrlutils::cufileops::state(tt,prov) ::testprov
+} -body {
+    set entry [dict create name doc.pdf path /in/zip/doc.pdf type file size 5]
+    set lp [::ctrlutils::cufileops::_localPath tt $entry]
+    set ch [open $lp rb] ; set got [read $ch] ; close $ch
+    list [string match *.pdf $lp] $got
+} -cleanup {
+    catch {file delete $lp}
+    rename ::testprov ""
+} -result {1 BYTES}
+
+cleanupTests

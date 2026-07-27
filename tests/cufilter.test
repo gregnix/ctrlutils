@@ -1,0 +1,74 @@
+package require tcltest
+namespace import ::tcltest::*
+
+set here [file dirname [file normalize [info script]]]
+set root [file dirname $here]
+tcl::tm::path add [file join $root lib tm]
+tcl::tm::path add [file join $root .. tclutils lib tm]
+tcl::tm::path add [file join $root .. tkutils lib tm]
+
+# Tk is needed for the entry widget and the file list.
+if {![catch {package require Tk}]
+ && ![catch {package require ctrlutils::cufilter}]
+ && ![catch {package require tkutils::tkufilelist}]} {
+    testConstraint haveTk 1
+} else {
+    testConstraint haveTk 0
+}
+catch {package require tclutils::tuprovider}
+
+# a scratch directory with a known mix of files
+set ::fdir [makeDirectory cufilt]
+foreach n {bericht.txt bericht.pdf notiz.txt daten.csv} {
+    set fh [open [file join $::fdir $n] w] ; puts $fh x ; close $fh
+}
+proc rows {lst} { llength [$lst.tbl childkeys root] }
+
+test cufilter-1.1 {bare text filters as a substring} -constraints haveTk -setup {
+    set prov [::tclutils::tuprovider open local]
+    ::tkutils::tkufilelist::widget .l1 -provider $prov -dir $::fdir
+    ::ctrlutils::cufilter::widget .f1 .l1
+} -body {
+    set ::ctrlutils::cufilter::state(.f1,text) "bericht"
+    ::ctrlutils::cufilter::_apply .f1
+    rows .l1
+} -cleanup {
+    destroy .l1 .f1
+} -result 2
+
+test cufilter-1.2 {a glob is honored as-is} -constraints haveTk -setup {
+    set prov [::tclutils::tuprovider open local]
+    ::tkutils::tkufilelist::widget .l2 -provider $prov -dir $::fdir
+    ::ctrlutils::cufilter::widget .f2 .l2
+} -body {
+    set ::ctrlutils::cufilter::state(.f2,text) "*.txt"
+    ::ctrlutils::cufilter::_apply .f2
+    rows .l2
+} -cleanup {
+    destroy .l2 .f2
+} -result 2
+
+test cufilter-1.3 {clear shows all files again} -constraints haveTk -setup {
+    set prov [::tclutils::tuprovider open local]
+    ::tkutils::tkufilelist::widget .l3 -provider $prov -dir $::fdir
+    ::ctrlutils::cufilter::widget .f3 .l3
+} -body {
+    set ::ctrlutils::cufilter::state(.f3,text) "bericht"
+    ::ctrlutils::cufilter::_apply .f3
+    ::ctrlutils::cufilter::clear .f3
+    rows .l3
+} -cleanup {
+    destroy .l3 .f3
+} -result 4
+
+test cufilter-1.4 {setFilter on the list is case-insensitive} -constraints haveTk -setup {
+    set prov [::tclutils::tuprovider open local]
+    ::tkutils::tkufilelist::widget .l4 -provider $prov -dir $::fdir
+} -body {
+    ::tkutils::tkufilelist::setFilter .l4 *BERICHT*
+    rows .l4
+} -cleanup {
+    destroy .l4
+} -result 2
+
+cleanupTests
