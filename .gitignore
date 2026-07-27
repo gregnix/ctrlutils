@@ -1,20 +1,4 @@
-# Output files
-*.pdf
-*.html
-out/
-output/
+examples/out/*
 
-# Temporary files
-*.tmp
-*~
-\#*\#
-
-# Debug output
-testdebug.*
-
-# OS
-.DS_Store
-Thumbs.db
-
-# nogit -- local-only, not for repository
+# internal development notes (not published)
 nogit/
