@@ -130,4 +130,43 @@ test cuundo-1.7 {undo on an empty stack is a no-op} -setup {
     ::ctrlutils::cuundo::clear t7
 } -result 0
 
+test cuundo-1.8 {undo of a cross-provider move restores source, removes target} -setup {
+    set sp [prov] ; set dp [prov]
+    ::ctrlutils::cuundo::install t8 $dp
+} -body {
+    # simulate the state after a cut+paste move: content at the target, gone at
+    # the source. The record carries both providers and the source snapshot.
+    set from [file join $::dir mv_src.txt]
+    set to   [file join $::dir mv_dst.txt]
+    $dp put $to "moved content"
+    set snap [dict create type file bytes "moved content"]
+    ::ctrlutils::cuundo::record t8 [dict create op movex \
+        srcprov $sp dstprov $dp from $from to $to type file saved $snap]
+    ::ctrlutils::cuundo::undo t8
+    set srcBack [expr {[exists $from] && [string trim [$sp get $from]] eq "moved content"}]
+    set dstGone [expr {![exists $to]}]
+    list $srcBack $dstGone
+} -cleanup {
+    ::ctrlutils::cuundo::clear t8
+    catch {file delete [file join $::dir mv_src.txt] [file join $::dir mv_dst.txt]}
+} -result {1 1}
+
+test cuundo-1.9 {redo of a cross-provider move re-applies it} -setup {
+    set sp [prov] ; set dp [prov]
+    ::ctrlutils::cuundo::install t9 $dp
+} -body {
+    set from [file join $::dir mv2_src.txt]
+    set to   [file join $::dir mv2_dst.txt]
+    $dp put $to "content two"
+    set snap [dict create type file bytes "content two"]
+    ::ctrlutils::cuundo::record t9 [dict create op movex \
+        srcprov $sp dstprov $dp from $from to $to type file saved $snap]
+    ::ctrlutils::cuundo::undo t9
+    ::ctrlutils::cuundo::redo t9
+    list [exists $to] [exists $from]
+} -cleanup {
+    ::ctrlutils::cuundo::clear t9
+    catch {file delete [file join $::dir mv2_src.txt] [file join $::dir mv2_dst.txt]}
+} -result {1 0}
+
 cleanupTests

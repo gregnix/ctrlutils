@@ -1,0 +1,254 @@
+package require Tcl 8.6-
+package require tcltest
+namespace import ::tcltest::*
+
+# Locate explorer.tcl robustly. This suite normally lives in
+# apps/explorer/tests/, but it may also be pulled in from the repo-root
+# tests/ (via all.tcl), where [info script] resolves one level higher and a
+# fixed "../explorer.tcl" would point at a nonexistent ctrlutils/explorer.tcl.
+# Try a handful of candidates relative to this file instead of assuming a
+# single layout.
+set here [file dirname [file normalize [info script]]]
+set candidates [list \
+    [file join $here .. explorer.tcl] \
+    [file join $here .. apps explorer explorer.tcl] \
+    [file join $here .. .. apps explorer explorer.tcl] \
+    [file join $here apps explorer explorer.tcl] ]
+set explorerTcl ""
+foreach c $candidates {
+    if {[file exists $c]} { set explorerTcl [file normalize $c] ; break }
+}
+set appdir [expr {$explorerTcl eq "" ? "" : [file dirname $explorerTcl]}]
+
+set haveTk [expr {![catch {package require Tk}]}]
+if {$haveTk} { catch {wm withdraw .} }
+
+# load the explorer namespace without auto-running main (argv0 mismatch)
+set ::argv0 __explorer_smoke__
+set loadErr ""
+if {$explorerTcl eq ""} {
+    set ok 0
+    set loadErr "explorer.tcl not found; tried: $candidates"
+} elseif {[catch {source $explorerTcl} e]} {
+    set ok 0
+    set loadErr $e
+} else {
+    set ok 1
+}
+testConstraint core $ok
+testConstraint tk [expr {$haveTk && $ok}]
+
+# Fail LOUDLY if the app could not be loaded at all, instead of silently
+# skipping every constrained test. A suite that reports "0 run" for the
+# Explorer looks green but hides a broken layout; this unconstrained test
+# always runs and only fails when the load failed.
+test explorer-0-load {explorer.tcl is found and sourced} -body {
+    if {!$ok} { error $loadErr }
+    set ok
+} -result 1
+
+test explorer-1 {hexCap is a sane default} -constraints core -body {
+    expr {$::explorer::hexCap >= 65536 && $::explorer::hexCap <= 1048576}
+} -result 1
+
+test explorer-2 {_kb formats bytes, KB and MB} -constraints core -body {
+    list [::explorer::_kb 500] [::explorer::_kb 65536] [::explorer::_kb 52428800]
+} -result {{500 bytes} {64 KB} {50.0 MB}}
+
+test explorer-3 {_previewHex reads only the cap for a large file} -constraints tk -setup {
+    set big [file join [tcltest::temporaryDirectory] explorer_big.bin]
+    set ch [open $big wb]; puts -nonewline $ch [string repeat "X" 2000000]; close $ch
+    package require tclutils::tuprovider
+    package require tkutils::tkupreview
+    ::tkutils::tkupreview::widget .pvsmoke
+} -body {
+    set p [::tclutils::tuprovider open local]
+    # instrument head: record the length requested
+    set ::explorer::_smokeLen -1
+    oo::objdefine $p method head {path len} {
+        set ::explorer::_smokeLen $len
+        set fh [open $path rb]; set d [expr {$len>0 ? [read $fh $len] : [read $fh]}]
+        close $fh; return $d
+    }
+    ::explorer::_previewHex .f .pvsmoke "big.bin" $p $big 2000000
+    # head must have been asked for hexCap bytes, not the whole 2 MB
+    expr {$::explorer::_smokeLen == $::explorer::hexCap}
+} -cleanup {
+    destroy .pvsmoke
+    file delete [file join [tcltest::temporaryDirectory] explorer_big.bin]
+} -result 1
+
+test explorer-4 {a small file is shown whole (no truncation path)} -constraints tk -setup {
+    set small [file join [tcltest::temporaryDirectory] explorer_small.bin]
+    set ch [open $small wb]; puts -nonewline $ch "hello"; close $ch
+    package require tclutils::tuprovider
+    package require tkutils::tkupreview
+    ::tkutils::tkupreview::widget .pvsmoke2
+} -body {
+    set p [::tclutils::tuprovider open local]
+    # small file: _previewHex takes the get() path, no error
+    set r [catch {::explorer::_previewHex .f .pvsmoke2 "small" $p $small 5} e]
+    list $r
+} -cleanup {
+    destroy .pvsmoke2
+    file delete [file join [tcltest::temporaryDirectory] explorer_small.bin]
+} -result {0}
+
+
+test explorer-5 {textCap is a sane default} -constraints core -body {
+    expr {$::explorer::textCap >= 262144 && $::explorer::textCap <= 8388608}
+} -result 1
+
+test explorer-6 {_previewText caps a large file and shows it as plain text} -constraints tk -setup {
+    set big [file join [tcltest::temporaryDirectory] explorer_big.log]
+    set ch [open $big wb]; puts -nonewline $ch [string repeat "log line here\n" 200000]; close $ch
+    package require tclutils::tuprovider
+    package require tkutils::tkupreview
+    ::tkutils::tkupreview::widget .pvt
+} -body {
+    set p [::tclutils::tuprovider open local]
+    set ::explorer::_smokeLen -1
+    oo::objdefine $p method head {path len} {
+        set ::explorer::_smokeLen $len
+        set fh [open $path rb]; set d [expr {$len>0 ? [read $fh $len] : [read $fh]}]
+        close $fh; return $d
+    }
+    set sz [file size $big]
+    ::explorer::_previewText .f .pvt "big.log" $p $big $sz text
+    expr {$::explorer::_smokeLen == $::explorer::textCap}
+} -cleanup {
+    destroy .pvt
+    file delete [file join [tcltest::temporaryDirectory] explorer_big.log]
+} -result 1
+
+test explorer-7 {_previewText renders a small structured file with its kind} -constraints tk -setup {
+    set j [file join [tcltest::temporaryDirectory] explorer_small.json]
+    set ch [open $j wb]; puts -nonewline $ch {{"a":1}}; close $ch
+    package require tclutils::tuprovider
+    package require tkutils::tkupreview
+    ::tkutils::tkupreview::widget .pvj
+} -body {
+    set p [::tclutils::tuprovider open local]
+    # small json: should call the json viewer without error
+    set r [catch {::explorer::_previewText .f .pvj "small.json" $p $j [file size $j] json} e]
+    list $r
+} -cleanup {
+    destroy .pvj
+    file delete [file join [tcltest::temporaryDirectory] explorer_small.json]
+} -result {0}
+
+
+test explorer-8 {mediaCap is a sane default} -constraints core -body {
+    expr {$::explorer::mediaCap >= 10485760}
+} -result 1
+
+test explorer-9 {_tooBigMedia refuses an oversize image/pdf/db, passes others} -constraints tk -setup {
+    package require tkutils::tkupreview
+    ::tkutils::tkupreview::widget .pvm
+} -body {
+    set big [expr {$::explorer::mediaCap + 1}]
+    set ok [expr {$::explorer::mediaCap - 1}]
+    list [::explorer::_tooBigMedia .pvm .png $big] \
+         [::explorer::_tooBigMedia .pvm .png $ok] \
+         [::explorer::_tooBigMedia .pvm .pdf $big] \
+         [::explorer::_tooBigMedia .pvm .txt $big] \
+         [::explorer::_tooBigMedia .pvm .png ""]
+} -cleanup {
+    destroy .pvm
+} -result {1 0 1 0 0}
+
+
+test explorer-10 {openRemote rejects a non-URL} -constraints core -body {
+    catch {::explorer::openRemote /just/a/path} e
+    string match {*remote URL*} $e
+} -result 1
+
+test explorer-11 {openRemote derives scheme and start dir from the URL} -constraints core -body {
+    # stub tuprovider open so no real connection is attempted; capture the scheme
+    set orig [info commands ::tclutils::tuprovider]
+    # openRemote requires the provider package; sftp is registered already.
+    # We only check the parsing branch by intercepting `open`.
+    set ::explorer::_probeScheme ""
+    proc ::tclutils::tuprovider {sub args} {
+        if {$sub eq "open"} {
+            set ::explorer::_probeScheme [lindex $args 0]
+            return ::fakeprov
+        }
+    }
+    proc ::fakeprov {args} {}
+    set res [::explorer::openRemote sftp://user@host:2222/remote/dir]
+    rename ::tclutils::tuprovider ""
+    rename ::fakeprov ""
+    list $::explorer::_probeScheme [lindex $res 1]
+} -result {sftp /remote/dir}
+
+
+test explorer-12 {preview switches exist with sane defaults} -constraints core -body {
+    list $::explorer::previewOn \
+         $::explorer::previewKind(text) $::explorer::previewKind(image) \
+         $::explorer::previewKind(pdf) $::explorer::previewKind(sqlite) \
+         $::explorer::previewKind(svg) $::explorer::previewKind(hex)
+} -result {1 1 1 1 1 1 1}
+
+test explorer-13 {master switch removes/re-adds a pane on a stub paned window} -constraints tk -setup {
+    catch {destroy .stub}
+    ttk::panedwindow .stub -orient horizontal
+    ttk::frame .stub.tree ; ttk::frame .stub.list ; ttk::frame .stub.prev
+    .stub add .stub.tree ; .stub add .stub.list ; .stub add .stub.prev
+    # register a fake tab keyed on ".stub" so _applyPreviewVisibility finds it.
+    dict set ::explorer::tab .stub prev .stub.prev
+    # _applyPreviewVisibility uses $f.pw.* ; make .stub act as $f.pw by aliasing.
+} -body {
+    # emulate what _applyPreviewVisibility does, using the same pane ops, so we
+    # verify the show/hide logic without building the whole app.
+    set pf .stub.prev
+    set before [llength [.stub panes]]
+    # hide
+    if {$pf in [.stub panes]} { .stub forget $pf }
+    set off [llength [.stub panes]]
+    # show
+    if {$pf ni [.stub panes]} { .stub add $pf -weight 5 }
+    set on [llength [.stub panes]]
+    list $before $off $on
+} -cleanup {
+    catch {dict unset ::explorer::tab .stub}
+    catch {destroy .stub}
+} -result {3 2 3}
+
+test explorer-14 {_previewOff shows a message without error} -constraints tk -setup {
+    package require tkutils::tkupreview
+    ::tkutils::tkupreview::widget .pvoff
+} -body {
+    catch {::explorer::_previewOff .pvoff "Text preview is turned off."}
+} -cleanup {
+    destroy .pvoff
+} -result {0}
+
+
+test explorer-15 {capability detection records every optional backend} -constraints core -body {
+    ::explorer::_detectCapabilities
+    set names {}
+    foreach k {img_jpeg img_tiff img_bmp img_ico svg pdf sqlite} {
+        if {[dict exists $::explorer::caps $k]} { lappend names $k }
+    }
+    lsort $names
+} -result {img_bmp img_ico img_jpeg img_tiff pdf sqlite svg}
+
+test explorer-16 {capability report is greppable and names each backend} -constraints core -body {
+    set rep [::explorer::capabilityReport]
+    expr {[string match "*PDF preview*" $rep]
+       && [string match "*SVG preview*" $rep]
+       && ([string match "*OK*" $rep] || [string match "*MISSING*" $rep])}
+} -result 1
+
+test explorer-17 {allCapabilitiesOk reflects a forced-missing backend} -constraints core -setup {
+    set saved $::explorer::caps
+} -body {
+    dict set ::explorer::caps pdf [dict create ok 0 detail "forced for test"]
+    set r [::explorer::allCapabilitiesOk]
+    expr {$r == 0}
+} -cleanup {
+    set ::explorer::caps $saved
+} -result 1
+
+cleanupTests

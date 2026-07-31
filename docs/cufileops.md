@@ -1,7 +1,7 @@
 # ctrlutils::cufileops
 
 A controller that adds capability-driven file operations -- New Folder, Rename,
-Delete, Copy, Paste -- to a `tkufilelist`, via a right-click context menu and
+Delete, Copy, Cut, Paste -- to a `tkufilelist`, via a right-click context menu and
 keyboard shortcuts. It is not a widget: it wires behavior onto a list that
 already exists, and acts through a `tuprovider`, so what it offers depends on
 what the provider can do.
@@ -34,6 +34,7 @@ The context menu and shortcuts route to these (also callable directly):
 ::ctrlutils::cufileops::rename    $f $entry
 ::ctrlutils::cufileops::delete    $f $entry
 ::ctrlutils::cufileops::copy      $f $entry
+::ctrlutils::cufileops::cut       $f $entry
 ::ctrlutils::cufileops::paste     $f
 ```
 
@@ -44,13 +45,66 @@ file opens in place; a provider-backed file (in a ZIP, on WebDAV/FTP) is first
 written to a temp file that keeps the original extension, so the opener picks the
 right application.
 
-Shortcuts on the list: Delete, F2 (rename), Ctrl+C (copy), Ctrl+V (paste).
+Shortcuts on the list: Delete, F2 (rename), Ctrl+C (copy), Ctrl+X (cut), Ctrl+V (paste).
 
 ## Capability-driven
 
 Each menu entry appears only when the provider supports the underlying operation
 (`mkdir` / `move` / `delete` / `get`+`put`). A read-only provider (a ZIP) offers
 none of the writing ones, so the UI never presents an action that would fail.
+
+## Open with: per-type app registry
+
+"Open with..." remembers applications per file extension instead of asking for a
+command every time. The registry is stored as a plain Tcl dict in the platform's
+config directory (via `tuopen configFile`): XDG on Linux, AppData on Windows,
+Application Support on macOS.
+
+Each extension maps to a list of launcher commands and one optional default:
+
+```
+.txt {apps {gedit {code -w}} default {code -w}}
+.pdf {apps {evince okular}   default evince}
+```
+
+Even before anything is registered the dialog is not empty: it lists **detected
+applications** installed on the system that suit the file's type (editors for
+text, image viewers for images, PDF viewers for `.pdf`, browsers for HTML, ...),
+found via `auto_execok`. Tcl source files (`.tcl`, `.tm`, `.test`, ...) suggest
+a Tcl editor (alited) first, then the general editors. These appear marked "(suggested)"; picking one opens the
+file and promotes it to a permanent entry for that type. There is also a
+"Browse..." button to choose any executable from disk.
+
+A command may include its own arguments (e.g. `code -w`); the file path is
+appended when launching. The "Open with..." dialog lists the apps for the
+selected file's type, marks the default, and lets you Open, Add, Remove, or Set
+as default. When a default is set for a type, the right-click menu shows an
+"Open with <app>" entry that opens it in one click. Double-click still uses the
+OS default opener (this registry is a menu-only convenience).
+
+Registry API (pure, no Tk needed once loaded):
+
+```tcl
+::ctrlutils::cufileops::owApps       $ext          ;# list of commands
+::ctrlutils::cufileops::owDefault    $ext          ;# default command or ""
+::ctrlutils::cufileops::owAddApp     $ext $cmd
+::ctrlutils::cufileops::owRemoveApp  $ext $cmd
+::ctrlutils::cufileops::owSetDefault $ext $cmd
+```
+
+`$ext` is a lowercase extension with the dot (".txt"); a file with no extension
+uses the empty key. Set `::ctrlutils::cufileops::owApp` to change the config
+sub-directory name, or `owFile` to point at an explicit file (tests do this).
+
+## Cross-provider move (cut)
+
+Cut marks a file or folder for **move**: the next paste writes it at the
+destination (the same `get`+`put`, recursive for folders) and then removes the
+source. Because it deletes the source, cut is only offered when the source
+provider supports `delete` -- you cannot cut out of a read-only ZIP (copy still
+works). The move is emitted as a single `movex` operation record carrying both
+providers and a snapshot of the source, so undo restores the source and removes
+the target, and redo re-applies the move. A cut is consumed by its paste.
 
 ## Cross-provider copy
 

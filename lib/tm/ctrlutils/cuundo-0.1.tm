@@ -122,6 +122,16 @@ proc ::ctrlutils::cuundo::_reverse {f recVar} {
                                  [dict get $r path] [dict get $r type]]
             $p delete [dict get $r path]
         }
+        movex  {
+            # cross-provider move: undo = delete at destination, restore source.
+            # Providers are carried in the record (they may differ from the tab
+            # provider). The source snapshot was taken by cufileops at cut time.
+            set sp [dict get $r srcprov] ; set dp [dict get $r dstprov]
+            set saved [dict get $r saved]
+            if {$saved eq ""} { error "no saved content to restore the source" }
+            $dp delete [dict get $r to]
+            ::ctrlutils::cuundo::_restore $sp [dict get $r from] $saved
+        }
         delete {
             set saved [dict get $r saved]
             if {$saved eq ""} { error "no saved content to restore" }
@@ -145,6 +155,15 @@ proc ::ctrlutils::cuundo::_apply {f rec} {
         paste  {
             if {![dict exists $rec snap]} { error "cannot redo paste (no snapshot)" }
             ::ctrlutils::cuundo::_restore $p [dict get $rec path] [dict get $rec snap]
+        }
+        movex  {
+            # redo cross-provider move: put the content back at the destination
+            # (from the source snapshot) and delete it at the source again.
+            set sp [dict get $rec srcprov] ; set dp [dict get $rec dstprov]
+            set saved [dict get $rec saved]
+            if {$saved eq ""} { error "cannot redo move (no snapshot)" }
+            ::ctrlutils::cuundo::_restore $dp [dict get $rec to] $saved
+            $sp delete [dict get $rec from]
         }
         delete { $p delete [dict get $rec path] }
         default { error "cannot redo op [dict get $rec op]" }

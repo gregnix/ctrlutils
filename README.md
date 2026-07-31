@@ -23,9 +23,9 @@ with e.g. `package require ctrlutils::cufilter`.
 Each module has a reference page under `docs/<module>.md` and a man page under
 `man/mann/<module>.n`:
 [cufileops](docs/cufileops.md), [cumonitor](docs/cumonitor.md),
-[cufilter](docs/cufilter.md), [cuundo](docs/cuundo.md). Tests live in
-`tests/<module>.test` (run via `tests/all.tcl`). The cross-repo Explorer
-walkthrough is in `doc/guide/provider-stand.md`.
+[cufilter](docs/cufilter.md), [cuundo](docs/cuundo.md),
+[cusync](docs/cusync.md). Tests live in
+`tests/<module>.test` (run via `tests/all.tcl`).
 
 ## cufileops -- file operations
 
@@ -97,3 +97,23 @@ is renamed back, a mkdir/paste is deleted, and a delete is restored from a
 snapshot cufileops captured *before* deleting (the file's bytes, or a whole
 directory subtree). Reversal is only offered when the provider can read the
 content back.
+
+## cusync -- directory compare and mirror
+
+Compares two directory trees, each on its own provider, and mirrors one onto the
+other. **One-way** and **non-destructive** by default: it copies what is missing
+and updates what is newer or differing, but never deletes on the target. No Tk --
+the Explorer supplies the dialog and progress bar.
+
+    set diffs [ctrlutils::cusync::compare $provL $dirL $provR $dirR]
+    set plan  [ctrlutils::cusync::plan $diffs LR]
+    set res   [ctrlutils::cusync::apply $provL $dirL $provR $dirR $plan]
+
+The flow is compare -> plan -> apply. `compare` classifies every entry
+(onlyLeft / onlyRight / newerLeft / newerRight / diff / same / conflict). `plan`
+turns that into a copy list for one direction (`LR` or `RL`), copying only
+missing and newer/differing entries and never the target-only side -- that is
+what keeps it non-destructive. `apply` executes the plan through the providers
+(`applyOne` runs a single action, so a UI can step through via `after` with a
+progress bar and Cancel). Because it works entirely through the provider
+interface, it mirrors across providers -- local, ZIP, WebDAV, SFTP.

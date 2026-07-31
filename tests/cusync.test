@@ -1,0 +1,166 @@
+# cusync.test -- one-way directory compare and mirror.
+#
+# cusync is pure Tcl (no Tk), so these run under plain "tclsh cusync.test" as
+# well as under wish. Two real temp directories with local providers stand in
+# for the two sides; a couple of mtimes are pinned so newer/older/same are
+# deterministic.
+
+package require tcltest
+namespace import ::tcltest::*
+
+set here [file dirname [file normalize [info script]]]
+set root [file dirname $here]
+tcl::tm::path add [file join $root lib tm]
+tcl::tm::path add [file join $root .. tclutils lib tm]
+
+package require ctrlutils::cusync
+package require tclutils::tuprovider
+
+set ::PL [::tclutils::tuprovider open local]
+set ::PR [::tclutils::tuprovider open local]
+
+proc W {path content} {
+    set fh [open $path wb]
+    puts -nonewline $fh $content
+    close $fh
+}
+
+# read a file back as a string
+proc viewFile {path} {
+    set fh [open $path rb]
+    set data [read $fh]
+    close $fh
+    return $data
+}
+
+# Build two trees with one of every relationship cusync cares about and return
+# {base L R}. Caller deletes $base when done.
+proc makeTrees {} {
+    set base [file join [temporaryDirectory] cusync_[pid]_[clock clicks]]
+    set L [file join $base L]
+    set R [file join $base R]
+    file mkdir $L $R
+    # only on the left: a file, and a whole subtree
+    W [file join $L onlyleft.txt] "left-only"
+    file mkdir [file join $L subdir]
+    W [file join $L subdir nested.txt] "nested"
+    # only on the right (must survive a LR sync -- cusync never deletes)
+    W [file join $R onlyright.txt] "right-only"
+    # newer on the left (left mtime > right mtime)
+    W [file join $L newer.txt] "new"
+    W [file join $R newer.txt] "old"
+    file mtime [file join $R newer.txt] 1000000
+    file mtime [file join $L newer.txt] 2000000
+    # identical (same mtime and size)
+    W [file join $L same.txt] "same"
+    W [file join $R same.txt] "same"
+    file mtime [file join $L same.txt] 1500000
+    file mtime [file join $R same.txt] 1500000
+    # same mtime but different size -> "diff"
+    W [file join $L diff.txt] "longcontent"
+    W [file join $R diff.txt] "x"
+    file mtime [file join $L diff.txt] 1700000
+    file mtime [file join $R diff.txt] 1700000
+    return [list $base $L $R]
+}
+
+proc statusByRel {L R} {
+    set byrel [dict create]
+    foreach d [::ctrlutils::cusync::compare $::PL $L $::PR $R] {
+        dict set byrel [dict get $d rel] [dict get $d status]
+    }
+    return $byrel
+}
+
+test cusync-1.1 {compare classifies every relationship} -body {
+    lassign [makeTrees] base L R
+    set s [statusByRel $L $R]
+    file delete -force $base
+    list [dict get $s onlyleft.txt] \
+         [dict get $s onlyright.txt] \
+         [dict get $s newer.txt] \
+         [dict get $s same.txt] \
+         [dict get $s diff.txt] \
+         [dict get $s subdir]
+} -result {onlyLeft onlyRight newerLeft same diff onlyLeft}
+
+test cusync-1.2 {compare recurses into left-only directories} -body {
+    lassign [makeTrees] base L R
+    set s [statusByRel $L $R]
+    file delete -force $base
+    dict get $s subdir/nested.txt
+} -result onlyLeft
+
+test cusync-2.1 {plan LR copies missing + newer + diff from the left, never pulls right-only} -body {
+    lassign [makeTrees] base L R
+    set acts [::ctrlutils::cusync::plan [::ctrlutils::cusync::compare $::PL $L $::PR $R] LR]
+    set rels [lmap a $acts {dict get $a rel}]
+    file delete -force $base
+    list [expr {"onlyright.txt" in $rels}] \
+         [expr {"onlyleft.txt"  in $rels}] \
+         [expr {"newer.txt"     in $rels}] \
+         [expr {"diff.txt"      in $rels}] \
+         [expr {"subdir"        in $rels}] \
+         [expr {"same.txt"      in $rels}]
+} -result {0 1 1 1 1 0}
+
+test cusync-2.2 {plan RL mirrors the opposite direction} -body {
+    lassign [makeTrees] base L R
+    set acts [::ctrlutils::cusync::plan [::ctrlutils::cusync::compare $::PL $L $::PR $R] RL]
+    set rels [lmap a $acts {dict get $a rel}]
+    file delete -force $base
+    list [expr {"onlyright.txt" in $rels}] [expr {"onlyleft.txt" in $rels}]
+} -result {1 0}
+
+test cusync-3.1 {apply LR creates the missing file and subtree on the right, non-destructive} -body {
+    lassign [makeTrees] base L R
+    set acts [::ctrlutils::cusync::plan [::ctrlutils::cusync::compare $::PL $L $::PR $R] LR]
+    set res  [::ctrlutils::cusync::apply $::PL $L $::PR $R $acts]
+    set ok [list \
+        [file exists      [file join $R onlyleft.txt]] \
+        [file isdirectory [file join $R subdir]] \
+        [file exists      [file join $R subdir nested.txt]] \
+        [file exists      [file join $R onlyright.txt]] \
+        [expr {[llength [dict get $res errors]] == 0}] \
+        [expr {[dict get $res done] >= 4}] ]
+    file delete -force $base
+    set ok
+} -result {1 1 1 1 1 1}
+
+test cusync-3.2 {apply LR overwrites the right copy for newer/diff} -body {
+    lassign [makeTrees] base L R
+    set acts [::ctrlutils::cusync::plan [::ctrlutils::cusync::compare $::PL $L $::PR $R] LR]
+    ::ctrlutils::cusync::apply $::PL $L $::PR $R $acts
+    set newer [viewFile [file join $R newer.txt]]
+    set diff  [viewFile [file join $R diff.txt]]
+    file delete -force $base
+    list $newer $diff
+} -result {new longcontent}
+
+test cusync-3.3 {applyOne copies a single file} -body {
+    lassign [makeTrees] base L R
+    set r [::ctrlutils::cusync::applyOne $::PL $L $::PR $R \
+              [dict create rel onlyleft.txt type file]]
+    set ok [list [dict get $r ok] [file exists [file join $R onlyleft.txt]]]
+    file delete -force $base
+    set ok
+} -result {1 1}
+
+test cusync-3.4 {applyOne creates a directory} -body {
+    lassign [makeTrees] base L R
+    set r [::ctrlutils::cusync::applyOne $::PL $L $::PR $R \
+              [dict create rel subdir type dir]]
+    set ok [list [dict get $r ok] [file isdirectory [file join $R subdir]]]
+    file delete -force $base
+    set ok
+} -result {1 1}
+
+test cusync-3.5 {applyOne reports an error for a missing source, without throwing} -body {
+    lassign [makeTrees] base L R
+    set r [::ctrlutils::cusync::applyOne $::PL $L $::PR $R \
+              [dict create rel does-not-exist.txt type file]]
+    file delete -force $base
+    list [dict get $r ok] [expr {[dict exists $r error] && [dict get $r error] ne ""}]
+} -result {0 1}
+
+cleanupTests

@@ -104,6 +104,42 @@ test cufileops-2.3 {paste collision picks a (copy) name} -constraints haveTk -se
     catch {file delete [file join $::tgt {doc (copy).txt}]}
 } -result 1
 
+test cufileops-2.4 {cut is refused on a read-only source (no delete cap)} -constraints haveTk -setup {
+    set src [MemSource new {/doc.txt {x}}]
+    ::tkutils::tkufilelist::widget .cz -provider $src -dir /
+    ::ctrlutils::cufileops::install czTab $src .cz {}
+    set ::ctrlutils::cufileops::clip {}
+} -body {
+    ::ctrlutils::cufileops::cut czTab \
+        [dict create name doc.txt path /doc.txt type file size 1]
+    ::ctrlutils::cufileops::_haveClip
+} -cleanup {
+    destroy .cz ; $src destroy ; set ::ctrlutils::cufileops::clip {}
+} -result 0
+
+test cufileops-2.5 {cross-provider cut moves the file and removes the source} -constraints haveTk -setup {
+    set srcdir [file join $::tgt cutsrc] ; file mkdir $srcdir
+    set fh [open [file join $srcdir m.txt] w] ; puts -nonewline $fh "move me" ; close $fh
+    set sp [::tclutils::tuprovider open local]
+    set dp [::tclutils::tuprovider open local]
+    ::tkutils::tkufilelist::widget .cs -provider $sp -dir $srcdir
+    ::tkutils::tkufilelist::widget .cd -provider $dp -dir $::tgt
+    ::ctrlutils::cufileops::install csT $sp .cs {}
+    ::ctrlutils::cufileops::install cdT $dp .cd {}
+    set ::ctrlutils::cufileops::clip {}
+} -body {
+    ::ctrlutils::cufileops::cut csT \
+        [dict create name m.txt path [file join $srcdir m.txt] type file size 7]
+    ::ctrlutils::cufileops::paste cdT
+    list [file exists [file join $::tgt m.txt]] \
+         [file exists [file join $srcdir m.txt]]
+} -cleanup {
+    destroy .cs .cd
+    catch {file delete [file join $::tgt m.txt]}
+    catch {file delete -force [file join $::tgt cutsrc]}
+    set ::ctrlutils::cufileops::clip {}
+} -result {1 0}
+
 
 test cufileops-2.1 {_localPath returns a local file path as-is} -constraints haveTk -setup {
     set d [makeDirectory ow]
@@ -129,5 +165,113 @@ test cufileops-2.2 {_localPath materializes provider bytes to a temp file} -cons
     catch {file delete $lp}
     rename ::testprov ""
 } -result {1 BYTES}
+
+
+test cufileops-3.1 {open-with registry: add apps and read them back} -constraints haveTk -setup {
+    set ::ctrlutils::cufileops::owFile [file join [tcltest::temporaryDirectory] ow1.dict]
+    catch {file delete $::ctrlutils::cufileops::owFile}
+    set ::ctrlutils::cufileops::owLoaded 0 ; set ::ctrlutils::cufileops::owCache ""
+} -body {
+    ::ctrlutils::cufileops::owAddApp .txt gedit
+    ::ctrlutils::cufileops::owAddApp .txt {code -w}
+    ::ctrlutils::cufileops::owAddApp .txt gedit ;# duplicate ignored
+    ::ctrlutils::cufileops::owApps .txt
+} -cleanup {
+    catch {file delete $::ctrlutils::cufileops::owFile}
+    set ::ctrlutils::cufileops::owFile ""
+} -result {gedit {code -w}}
+
+test cufileops-3.2 {open-with registry: default set, persisted across reload} -constraints haveTk -setup {
+    set ::ctrlutils::cufileops::owFile [file join [tcltest::temporaryDirectory] ow2.dict]
+    catch {file delete $::ctrlutils::cufileops::owFile}
+    set ::ctrlutils::cufileops::owLoaded 0 ; set ::ctrlutils::cufileops::owCache ""
+} -body {
+    ::ctrlutils::cufileops::owAddApp .pdf evince
+    ::ctrlutils::cufileops::owSetDefault .pdf okular ;# adds + defaults
+    # force a reload from disk
+    set ::ctrlutils::cufileops::owLoaded 0 ; set ::ctrlutils::cufileops::owCache ""
+    list [lsort [::ctrlutils::cufileops::owApps .pdf]] [::ctrlutils::cufileops::owDefault .pdf]
+} -cleanup {
+    catch {file delete $::ctrlutils::cufileops::owFile}
+    set ::ctrlutils::cufileops::owFile ""
+} -result {{evince okular} okular}
+
+test cufileops-3.3 {open-with registry: removing the default clears it} -constraints haveTk -setup {
+    set ::ctrlutils::cufileops::owFile [file join [tcltest::temporaryDirectory] ow3.dict]
+    catch {file delete $::ctrlutils::cufileops::owFile}
+    set ::ctrlutils::cufileops::owLoaded 0 ; set ::ctrlutils::cufileops::owCache ""
+} -body {
+    ::ctrlutils::cufileops::owSetDefault .md {code -w}
+    ::ctrlutils::cufileops::owRemoveApp .md {code -w}
+    list [::ctrlutils::cufileops::owApps .md] [::ctrlutils::cufileops::owDefault .md]
+} -cleanup {
+    catch {file delete $::ctrlutils::cufileops::owFile}
+    set ::ctrlutils::cufileops::owFile ""
+} -result {{} {}}
+
+test cufileops-3.4 {open-with key derivation is case-insensitive, keeps the dot} -constraints haveTk -body {
+    list [::ctrlutils::cufileops::_owKey photo.JPG] \
+         [::ctrlutils::cufileops::_owKey NOTES.txt] \
+         [::ctrlutils::cufileops::_owKey README]
+} -result {.jpg .txt {}}
+
+
+test cufileops-3.5 {suggestion categories map extensions correctly} -constraints haveTk -body {
+    list [::ctrlutils::cufileops::_owCats .tcl] \
+         [::ctrlutils::cufileops::_owCats .tm] \
+         [::ctrlutils::cufileops::_owCats .png] \
+         [::ctrlutils::cufileops::_owCats .pdf] \
+         [::ctrlutils::cufileops::_owCats .html] \
+         [::ctrlutils::cufileops::_owCats .txt] \
+         [::ctrlutils::cufileops::_owCats .xyz]
+} -result {{tcleditor editor} {tcleditor editor} {image editor} pdf {html editor} editor editor}
+
+test cufileops-3.6 {suggestions list only installed apps and exclude registered} -constraints haveTk -setup {
+    set ::ctrlutils::cufileops::owFile [file join [tcltest::temporaryDirectory] ow6.dict]
+    catch {file delete $::ctrlutils::cufileops::owFile}
+    set ::ctrlutils::cufileops::owLoaded 0 ; set ::ctrlutils::cufileops::owCache ""
+    # a fake app guaranteed NOT installed must never be suggested
+} -body {
+    set sug [::ctrlutils::cufileops::_owSuggest .txt]
+    # every suggested command's executable must be resolvable on PATH
+    set allInstalled 1
+    foreach cmd $sug {
+        if {[auto_execok [lindex $cmd 0]] eq ""} { set allInstalled 0 }
+    }
+    # registering one of the suggestions removes it from later suggestions
+    set excluded 1
+    if {[llength $sug]} {
+        set one [lindex $sug 0]
+        ::ctrlutils::cufileops::owAddApp .txt $one
+        if {$one in [::ctrlutils::cufileops::_owSuggest .txt]} { set excluded 0 }
+    }
+    list $allInstalled $excluded
+} -cleanup {
+    catch {file delete $::ctrlutils::cufileops::owFile}
+    set ::ctrlutils::cufileops::owFile ""
+} -result {1 1}
+
+
+test cufileops-3.7 {a Tcl editor on PATH is suggested first for .tcl} -constraints haveTk -setup {
+    set ::ctrlutils::cufileops::owFile [file join [tcltest::temporaryDirectory] ow7.dict]
+    catch {file delete $::ctrlutils::cufileops::owFile}
+    set ::ctrlutils::cufileops::owLoaded 0 ; set ::ctrlutils::cufileops::owCache ""
+    # create a fake "alited" on PATH so detection finds it, regardless of host
+    set bindir [file join [tcltest::temporaryDirectory] owbin7]
+    file mkdir $bindir
+    set exe [file join $bindir alited]
+    set ch [open $exe w] ; puts $ch "#!/bin/sh\necho alited" ; close $ch
+    catch {file attributes $exe -permissions 0755}
+    set ::env(PATH) "$bindir:$::env(PATH)"
+    auto_reset
+} -body {
+    set sug [::ctrlutils::cufileops::_owSuggest .tcl]
+    # alited (from the tcleditor category) must be present and come first
+    lindex $sug 0
+} -cleanup {
+    catch {file delete $::ctrlutils::cufileops::owFile}
+    set ::ctrlutils::cufileops::owFile ""
+    catch {file delete -force [file join [tcltest::temporaryDirectory] owbin7]}
+} -result alited
 
 cleanupTests

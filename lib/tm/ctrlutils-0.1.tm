@@ -14,6 +14,7 @@
 #   cumonitor  provider-agnostic directory watcher (polls, fires on change)
 #   cufilter   live name-filter box wired to a file list
 #   cuundo     undo/redo for cufileops operations
+#   cusync     one-way directory compare and mirror (provider-agnostic, no Tk)
 #
 # Each depends only on the provider interface (any tclutils provider) and on
 # tkutils widgets -- never on a specific application, so any app built on the
@@ -29,5 +30,6 @@ package require ctrlutils::cufileops
 package require ctrlutils::cumonitor
 package require ctrlutils::cufilter
 package require ctrlutils::cuundo
+package require ctrlutils::cusync
 
 package provide ctrlutils 0.1
