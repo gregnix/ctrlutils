@@ -35,6 +35,22 @@ and without a window manager, against the Explorer window's actual position
 +x+y). With the old `cufileops` that test
 stays red even with the fixed `tkudialog` — both libraries had to change.
 
+### Explorer: errors you can read and copy
+
+A startup error went to `tk_messageBox`, with the message and the whole Tcl
+stack in one label: long, cramped, not selectable (reported 2026-09-19).
+Errors now go to `tkudialog`: the message on top, the stack under "Details"
+(scrolls, at most 12 lines high), both selectable, with a Copy button.
+Background errors (event bindings, `after` scripts) use the same dialog
+(`interp bgerror`, installed by `main`, so the test suite is not affected).
+`tk_messageBox` remains only as the last resort when tkutils itself cannot be
+loaded. The "Sync"/"Find unavailable" messages now open over their window.
+
+The startup error in question was `unknown option "-provider"` from
+`tkufiletree` (fixed in tkutils 0.44.0). It also left a second error: the
+first tab-change event arrived before any tab was registered and found no
+`tab` variable at all. `::explorer::tab` now starts as an empty dict.
+
 ### Descriptions and categories
 
 None of the five controllers had a `# Description:` or `# Category:` header,

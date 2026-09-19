@@ -218,7 +218,9 @@ proc ::explorer::_showCapabilityDialog {{onClose ""}} {
 
 namespace eval ::explorer {
     variable start "/"      ;# directory the first tab opens
-    variable tab            ;# per-tab state, keyed by content-frame path
+    variable tab {}         ;# per-tab state, keyed by content-frame path (starts empty:
+                            ;# a tab-change event can arrive before the first tab is
+                            ;# registered -- it then found no variable at all)
     variable statustext        ;# array: statustext($w) per window
     variable firstProv ""   ;# provider for the very first tab
     variable hexCap 262144   ;# max bytes to read/hex-dump for a binary preview (256 KB)
@@ -1243,7 +1245,7 @@ proc ::explorer::openSyncDialog {w {leftDir ""}} {
     variable haveSync
     if {!$haveSync} {
         set msg "Sync needs the ctrlutils::cusync module.\n\nInstall cusync-0.1.tm next to the other ctrlutils\nmodules (ctrlutils/lib/tm/ctrlutils/) and restart."
-        if {[catch {::tkutils::tkudialog::showError $msg}]} {
+        if {[catch {::tkutils::tkudialog::showError $msg -parent $w}]} {
             catch {tk_messageBox -parent $w -icon error -title "Sync unavailable" -message $msg}
         }
         return
@@ -1568,7 +1570,7 @@ proc ::explorer::_findInList {w} {
     variable haveListFind
     if {!$haveListFind} {
         set msg "Find in list needs the tkutils::tkutlfind module.\n\nInstall tkutlfind-0.1.tm with the other tkutils modules."
-        if {[catch {::tkutils::tkudialog::showError $msg}]} {
+        if {[catch {::tkutils::tkudialog::showError $msg -parent $w}]} {
             catch {tk_messageBox -parent $w -icon error -title "Find unavailable" -message $msg}
         }
         return
@@ -2206,7 +2208,32 @@ proc ::explorer::onTabClose {f} {
 proc ::explorer::setStatus {msg {w .}} { set ::explorer::statustext($w) $msg }
 
 # ---- main -----------------------------------------------------------------
+# _errorDialog title message ?detail? -- show an error the user can read,
+# select and copy: the message on top, the Tcl stack under "Details", and a
+# Copy button (tkudialog). Up to ctrlutils 0.2 (first build) a startup error
+# went to tk_messageBox with message AND stack in one label: long, cramped,
+# not selectable (reported 2026-09-19). tk_messageBox remains only as the last
+# resort when tkutils itself could not be loaded -- then with the short
+# message only; the stack goes to stderr.
+proc ::explorer::_errorDialog {title message {detail ""}} {
+    set opts [list -title $title]
+    if {$detail ne ""} { lappend opts -detail $detail }
+    if {![catch {::tkutils::tkudialog::showError $message {*}$opts}]} { return }
+    if {$detail ne ""} { catch {puts stderr $detail} }
+    catch {tk_messageBox -icon error -title $title -message $message}
+}
+
+# Background errors (event bindings, after scripts) end up in the same dialog
+# instead of Tk's default one. Installed by main, so the test suite, which
+# loads this file without running main, keeps tcltest's own handling.
+proc ::explorer::_bgerror {message opts} {
+    set info ""
+    if {[dict exists $opts -errorinfo]} { set info [dict get $opts -errorinfo] }
+    _errorDialog "Explorer error" $message $info
+}
+
 proc ::explorer::main {argv} {
+    interp bgerror {} ::explorer::_bgerror
     # -check / --check: show the capability report and exit with 0 only if every
     # optional backend loaded, so a build can be verified right after building.
     # On a console (Linux) it also prints; on Windows (GUI exe, no console) the
@@ -2237,8 +2264,7 @@ if {[info exists argv0] && [file tail [info script]] eq [file tail $argv0]} {
     # Any startup failure must be visible, not a blank screen (Windows GUI exe
     # has no console). Show the error and the stack in a dialog.
     if {[catch {::explorer::main $argv} err opts]} {
-        catch {tk_messageBox -icon error -title "Explorer error" \
-            -message "$err\n\n[dict get $opts -errorinfo]"}
+        ::explorer::_errorDialog "Explorer error" $err [dict get $opts -errorinfo]
         exit 1
     }
 }
