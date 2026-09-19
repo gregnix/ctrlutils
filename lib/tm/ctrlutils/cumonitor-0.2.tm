@@ -1,4 +1,6 @@
 # cumonitor -- a provider-agnostic directory monitor.
+# Description: a provider-agnostic directory monitor (polling)
+# Category: Tk · controllers
 #
 # Watches one directory through the provider interface and fires a callback
 # when its contents change (a file added, removed, resized, or re-timed). It
@@ -37,7 +39,10 @@ proc ::ctrlutils::cumonitor::install {f prov args} {
         switch -- $k {
             -interval { set interval $v }
             -onchange { set onchange $v }
-            default   { error "unknown option: $k" }
+            default   {
+                return -code error -errorcode [list CTRLUTILS CUMONITOR OPTION $k] \
+                    "unknown option \"$k\"\nKnown: -interval -onchange"
+            }
         }
     }
     dict set state $f prov     $prov
@@ -144,4 +149,4 @@ proc ::ctrlutils::cumonitor::_tick {f} {
     return
 }
 
-package provide ctrlutils::cumonitor 0.1
+package provide ctrlutils::cumonitor 0.2

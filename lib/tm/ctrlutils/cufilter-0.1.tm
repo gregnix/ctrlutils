@@ -1,4 +1,6 @@
 # cufilter -- a live filter box for a file list.
+# Description: a live filter box for a file list
+# Category: Tk · controllers
 #
 # Wires a text entry to a tkufilelist's name filter: as the user types, the list
 # shows only matching files (directories always stay, so navigation still

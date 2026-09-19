@@ -84,4 +84,10 @@ test cumonitor-1.5 {stop removes state} -body {
     set r ok
 } -result ok
 
+test cumonitor-9.1 {install: unknown option names the known ones, with an errorcode} -body {
+    set p [::tclutils::tuprovider open local]
+    catch {::ctrlutils::cumonitor::install t9 $p -intervall 100} m o
+    list [dict get $o -errorcode] [string match "*Known: -interval -onchange" $m]
+} -result {{CTRLUTILS CUMONITOR OPTION -intervall} 1}
+
 cleanupTests

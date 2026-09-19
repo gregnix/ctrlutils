@@ -1,4 +1,6 @@
 # cusync-0.1.tm -- directory comparison and one-way mirroring over tuproviders.
+# Description: directory compare and one-way mirroring over providers, no Tk
+# Category: Archive · filesystem
 #
 # Compares two directory trees (each on its own provider, so local <-> ZIP <->
 # SFTP <-> WebDAV all work) and mirrors newer/missing entries from one side to

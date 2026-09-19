@@ -18,7 +18,9 @@ package require ctrlutils::cumonitor
 
 - `install` -- set up a monitor for the view `$f` over `$prov`. `-interval` is
   the poll period in ms (default 2000); `-onchange script` is appended the
-  changed directory.
+  changed directory. An unknown option is an error listing the known ones,
+  `{CTRLUTILS CUMONITOR OPTION <opt>}` (0.2; before, a plain error without
+  errorcode).
 - `watch $f $dir` -- watch `$dir` (re-baselines silently on each call, so
   navigating between directories does not look like a change).
 - `poke $f` -- absorb the current state as the new baseline, without firing. Call

@@ -1,0 +1,30 @@
+.TH cufilter n 0.1 ctrlutils
+.SH ctrlutils::cufilter
+.PP
+A controller that provides a live filter box for a \fBtkufilelist\fR. As the user types, the list shows only matching files; directories always stay, so navigation still works while a filter is active.
+.SS API
+.CS
+package require ctrlutils::cufilter
+
+::ctrlutils::cufilter::widget $path $listwidget   ;# build the filter box
+::ctrlutils::cufilter::clear  $path               ;# empty it, show all
+.CE
+.IP \(bu
+\fBwidget $path $listwidget\fR \-\- create a filter entry at \fB$path\fR, wired to \fB$listwidget\fR (a \fBtkufilelist\fR). Returns \fB$path\fR.
+.IP \(bu
+\fBclear $path\fR \-\- empty the box and return focus to the list.
+.SS Filtering
+.PP
+The typed text becomes a glob passed to \fBtkufilelist::setFilter\fR: bare text is wrapped as \fB*text*\fR so it matches as a substring; text containing \fB*\fR or \fB?\fR is used as a full glob. Matching is case\-insensitive. Escape or the clear button empties the box.
+.SS Wiring
+.CS
+::tkutils::tkufilelist::widget .list -dir [pwd]
+::ctrlutils::cufilter::widget .filter .list
+pack .filter -side top -fill x
+pack .list   -side bottom -fill both -expand 1
+.CE
+.PP
+Requires a \fBtkufilelist\fR with the \fB\-filter\fR option / \fBsetFilter\fR method.
+.SS "See also"
+.PP
+\fBcufileops\fR, \fBcumonitor\fR, \fBcuundo\fR, \fBtkutils::tkufilelist\fR

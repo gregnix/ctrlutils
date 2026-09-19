@@ -21,7 +21,9 @@ package require ctrlutils::cuundo
 
 - `install $f $prov` -- set up undo/redo state for the view `$f`, reversing
   through `$prov`. `-list widget` binds Ctrl+Z / Ctrl+Y (and Ctrl+Shift+Z) on the
-  list body.
+  list body. An unknown option is an error listing the known ones,
+  `{CTRLUTILS CUUNDO OPTION <opt>}` (0.2; up to 0.1 a typo like `-lst` silently
+  lost the key bindings).
 - `record $f $rec` -- record an operation. Pass it to cufileops as
   `-onop [list ctrlutils::cuundo::record $f]`. New activity clears the redo stack.
 - `undo` / `redo` -- reverse / re-apply the last operation.

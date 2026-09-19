@@ -169,4 +169,10 @@ test cuundo-1.9 {redo of a cross-provider move re-applies it} -setup {
     catch {file delete [file join $::dir mv2_src.txt] [file join $::dir mv2_dst.txt]}
 } -result {1 0}
 
+test cuundo-9.1 {install: unknown option is an error that names the known ones} -body {
+    set p [::tclutils::tuprovider open local]
+    catch {::ctrlutils::cuundo::install t9 $p -lst .x} m o
+    list [dict get $o -errorcode] [string match "*Known: -list" $m]
+} -result {{CTRLUTILS CUUNDO OPTION -lst} 1}
+
 cleanupTests

@@ -1,0 +1,78 @@
+.TH cufileops n 0.2 ctrlutils
+.SH ctrlutils::cufileops
+.PP
+A controller that adds capability\-driven file operations \-\- New Folder, Rename, Delete, Copy, Cut, Paste \-\- to a \fBtkufilelist\fR, via a right\-click context menu and keyboard shortcuts. It is not a widget: it wires behavior onto a list that already exists, and acts through a \fBtuprovider\fR, so what it offers depends on what the provider can do.
+.SS Install
+.CS
+package require ctrlutils::cufileops
+
+::ctrlutils::cufileops::install $f $prov $listwidget $refreshcmd ?-onop script?
+.CE
+.IP \(bu
+\fB$f\fR \-\- an identity token for this view (e.g. a tab frame path); all state is keyed by it, so several views can each have their own.
+.IP \(bu
+\fB$prov\fR \-\- the storage provider.
+.IP \(bu
+\fB$listwidget\fR \-\- the \fBtkufilelist\fR path.
+.IP \(bu
+\fB$refreshcmd\fR \-\- a script run after any successful change (to re\-read the directory into the list).
+.IP \(bu
+\fB\-onop script\fR \-\- optional; called with an operation\-record dict after each successful operation, so an observer such as \fBcuundo\fR can record it for undo.
+.PP
+An unknown option is an error that lists the known ones, \fB{CTRLUTILS CUFILEOPS OPTION <opt>}\fR (0.2; up to 0.1 a typo such as \fB\-onpo\fR was swallowed and silently disabled undo).
+.SS Operations
+.PP
+The context menu and shortcuts route to these (also callable directly):
+.CS
+::ctrlutils::cufileops::newFolder $f
+::ctrlutils::cufileops::openFile  $f $entry   ;# open with the OS default app
+::ctrlutils::cufileops::openWith  $f $entry   ;# open with a program the user names
+::ctrlutils::cufileops::rename    $f $entry
+::ctrlutils::cufileops::delete    $f ?$entry ...?
+::ctrlutils::cufileops::copy      $f ?$entry ...?   ;# one or more entries (multi-select)
+::ctrlutils::cufileops::cut       $f ?$entry ...?
+::ctrlutils::cufileops::paste     $f
+.CE
+.PP
+For a file the provider can read, the menu also offers \fBOpen\fR (launch the OS default application via \fBtclutils::tuopen\fR, falling back to xdg\-open/open/start) and \fBOpen with...\fR (prompt for a program and run it with the file). A local file opens in place; a provider\-backed file (in a ZIP, on WebDAV/FTP) is first written to a temp file that keeps the original extension, so the opener picks the right application.
+.PP
+Shortcuts on the list: Delete, F2 (rename), Ctrl+C (copy), Ctrl+X (cut), Ctrl+V (paste).
+.SS "Dialogs belong to the view's window (0.2)"
+.PP
+Every prompt, confirmation and error dialog (New Folder, Rename, Delete, paste and open failures) is opened with \fB\-parent\fR set to the toplevel of the view's list, so it is transient to that window and centred over it. Up to 0.1 no dialog got a parent and \fBtkudialog\fR 0.1 put each one in the middle of the screen — with the Explorer on a second monitor, on the other one. Measured 2026\-09\-19: Explorer window at 860,560, the New Folder prompt centred over it. Needs \fBtkutils::tkudialog\fR 0.2.
+.SS Capability\-driven
+.PP
+Each menu entry appears only when the provider supports the underlying operation (\fBmkdir\fR / \fBmove\fR / \fBdelete\fR / \fBget\fR+\fBput\fR). A read\-only provider (a ZIP) offers none of the writing ones, so the UI never presents an action that would fail.
+.SS "Open with: per\-type app registry"
+.PP
+"Open with..." remembers applications per file extension instead of asking for a command every time. The registry is stored as a plain Tcl dict in the platform's config directory (via \fBtuopen configFile\fR): XDG on Linux, AppData on Windows, Application Support on macOS.
+.PP
+Each extension maps to a list of launcher commands and one optional default:
+.CS
+\&.txt {apps {gedit {code -w}} default {code -w}}
+\&.pdf {apps {evince okular}   default evince}
+.CE
+.PP
+Even before anything is registered the dialog is not empty: it lists \fBdetected\fR\fB \fR\fBapplications\fR installed on the system that suit the file's type (editors for text, image viewers for images, PDF viewers for \fB.pdf\fR, browsers for HTML, ...), found via \fBauto_execok\fR. Tcl source files (\fB.tcl\fR, \fB.tm\fR, \fB.test\fR, ...) suggest a Tcl editor (alited) first, then the general editors. These appear marked "(suggested)"; picking one opens the file and promotes it to a permanent entry for that type. There is also a "Browse..." button to choose any executable from disk.
+.PP
+A command may include its own arguments (e.g. \fBcode \-w\fR); the file path is appended when launching. The "Open with..." dialog lists the apps for the selected file's type, marks the default, and lets you Open, Add, Remove, or Set as default. When a default is set for a type, the right\-click menu shows an "Open with " entry that opens it in one click. Double\-click still uses the OS default opener (this registry is a menu\-only convenience).
+.PP
+Registry API (pure, no Tk needed once loaded):
+.CS
+::ctrlutils::cufileops::owApps       $ext          ;# list of commands
+::ctrlutils::cufileops::owDefault    $ext          ;# default command or ""
+::ctrlutils::cufileops::owAddApp     $ext $cmd
+::ctrlutils::cufileops::owRemoveApp  $ext $cmd
+::ctrlutils::cufileops::owSetDefault $ext $cmd
+.CE
+.PP
+\fB$ext\fR is a lowercase extension with the dot (".txt"); a file with no extension uses the empty key. Set \fB::ctrlutils::cufileops::owApp\fR to change the config sub\-directory name, or \fBowFile\fR to point at an explicit file (tests do this).
+.SS "Cross\-provider move (cut)"
+.PP
+Cut marks a file or folder for \fBmove\fR: the next paste writes it at the destination (the same \fBget\fR+\fBput\fR, recursive for folders) and then removes the source. Because it deletes the source, cut is only offered when the source provider supports \fBdelete\fR \-\- you cannot cut out of a read\-only ZIP (copy still works). The move is emitted as a single \fBmovex\fR operation record carrying both providers and a snapshot of the source, so undo restores the source and removes the target, and redo re\-applies the move. A cut is consumed by its paste.
+.SS "Cross\-provider copy"
+.PP
+Copy/Paste runs \fBget\fR+\fBput\fR at the controller level, not the provider's internal \fBcopy\fR, so it works \fBacross\fR providers: a file (or a whole directory, copied recursively) can be pulled out of a ZIP into a local directory. The clipboard remembers the \fIsource\fR provider, so pasting into a view backed by a different provider triggers the cross\-provider path. On a name collision, paste picks a free \fBname (copy).ext\fR rather than overwriting.
+.SS "See also"
+.PP
+\fBcumonitor\fR, \fBcufilter\fR, \fBcuundo\fR, \fBtclutils::tuprovider\fR, \fBtkutils::tkufilelist\fR

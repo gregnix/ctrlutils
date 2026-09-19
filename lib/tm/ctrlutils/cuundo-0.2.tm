@@ -1,4 +1,6 @@
 # cuundo -- undo/redo for cufileops file operations.
+# Description: undo/redo for cufileops file operations
+# Category: Tk · controllers
 #
 # cufileops emits an operation record after each successful op (via its -onop
 # callback). cuundo records those on an undo stack and reverses them on request;
@@ -36,6 +38,18 @@ namespace eval ::ctrlutils::cuundo {
 
 proc ::ctrlutils::cuundo::install {f prov args} {
     variable state
+    # unknown options are an error naming the known ones (up to 0.1 `array set`
+    # swallowed them: a typo like -lst silently lost the Ctrl+Z binding)
+    if {[llength $args] % 2} {
+        return -code error -errorcode {CTRLUTILS CUUNDO OPTION} \
+            "missing value for option \"[lindex $args end]\""
+    }
+    foreach {k v} $args {
+        if {$k ni {-list}} {
+            return -code error -errorcode [list CTRLUTILS CUUNDO OPTION $k] \
+                "unknown option \"$k\"\nKnown: -list"
+        }
+    }
     array set o {-list ""}
     array set o $args
     set state($f,prov) $prov
@@ -209,4 +223,4 @@ proc ::ctrlutils::cuundo::_join {dir name} {
     return "[string trimright $dir /]/$name"
 }
 
-package provide ctrlutils::cuundo 0.1
+package provide ctrlutils::cuundo 0.2

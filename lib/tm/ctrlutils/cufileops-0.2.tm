@@ -1,4 +1,6 @@
 # cufileops -- a capability-driven file-operations controller for a file list.
+# Description: capability-driven file operations (menu, keys, copy/paste, dialogs) for a file list
+# Category: Tk · controllers
 #
 # New Folder / Rename / Delete / Copy / Paste, each shown only when the provider
 # actually supports the underlying operation (mkdir / move / delete / get+put).
@@ -24,7 +26,7 @@
 #     refreshcmd  a script run after a successful change (re-reads the dir)
 
 package require tkutils::tkucontextmenu
-package require tkutils::tkudialog
+package require tkutils::tkudialog 0.2
 # tuopen (open a file with the OS default app) is optional: if it is not on the
 # path, the "Open" entry falls back to launching via exec, and only "Open
 # with..." (which uses exec directly) is offered.
@@ -199,6 +201,26 @@ proc ::ctrlutils::cufileops::_owSuggest {ext} {
 
 # Attach a right-click menu to the list. The menu is rebuilt on each show from
 # the provider's caps, so it always reflects what is actually possible.
+# _dlgParent f -- the toplevel of this view's list, or "" (tkudialog then
+# falls back to the focus toplevel).
+proc ::ctrlutils::cufileops::_dlgParent {f} {
+    variable state
+    if {$f ne "" && [info exists state($f,list)] && [winfo exists $state($f,list)]} {
+        return [winfo toplevel $state($f,list)]
+    }
+    return ""
+}
+
+# _dlg f cmd ?arg ...? -- a tkudialog call with -parent set to this view's
+# window. Up to 0.1 no dialog got -parent, and tkudialog 0.1 centred every one
+# on the screen: with the Explorer on a second monitor, errors, prompts and
+# confirmations opened on the other one.
+proc ::ctrlutils::cufileops::_dlg {f cmd args} {
+    set p [_dlgParent $f]
+    if {$p ne ""} { lappend args -parent $p }
+    return [::tkutils::tkudialog::$cmd {*}$args]
+}
+
 proc ::ctrlutils::cufileops::install {f prov listwidget refreshcmd args} {
     variable state
     set state($f,prov)    $prov
@@ -207,6 +229,18 @@ proc ::ctrlutils::cufileops::install {f prov listwidget refreshcmd args} {
     # optional -onop callback: called with an operation-record dict after each
     # successful op, so an observer (e.g. ctrlutils::cuundo) can record it for
     # undo. cufileops stays unaware of who observes -- it just emits records.
+    # unknown options are an error naming the known ones (up to 0.1 they were
+    # swallowed by `array set`: a typo like -onpo simply disabled undo)
+    foreach {k v} $args {
+        if {$k ni {-onop}} {
+            return -code error -errorcode [list CTRLUTILS CUFILEOPS OPTION $k] \
+                "unknown option \"$k\"\nKnown: -onop"
+        }
+    }
+    if {[llength $args] % 2} {
+        return -code error -errorcode {CTRLUTILS CUFILEOPS OPTION} \
+            "missing value for option \"[lindex $args end]\""
+    }
     array set o {-onop ""}
     array set o $args
     set state($f,onop) $o(-onop)
@@ -413,11 +447,11 @@ proc ::ctrlutils::cufileops::_tmpdir {} {
 proc ::ctrlutils::cufileops::openFile {f entry} {
     variable state
     if {[catch {_localPath $f $entry} path]} {
-        ::tkutils::tkudialog::showError "Could not read file:\n$path" ; return
+        _dlg $f showError "Could not read file:\n$path" ; return
     }
     if {[llength [info commands ::tclutils::tuopen::launch]]} {
         if {[catch {::tclutils::tuopen::launch $path} e]} {
-            ::tkutils::tkudialog::showError "Could not open:\n$e"
+            _dlg $f showError "Could not open:\n$e"
         }
         return
     }
@@ -427,16 +461,16 @@ proc ::ctrlutils::cufileops::openFile {f entry} {
         ($::tcl_platform(os) eq "Darwin" ? {open} : {xdg-open})
     }]
     if {[catch {exec {*}$opener $path &} e]} {
-        ::tkutils::tkudialog::showError "Could not open:\n$e"
+        _dlg $f showError "Could not open:\n$e"
     }
 }
 
 # Open a file with a program the user names.
 # Launch $path with a launcher command string $app (which may include its own
 # arguments, e.g. "code -w"). Runs detached with the file as the final argument.
-proc ::ctrlutils::cufileops::_owLaunch {app path} {
+proc ::ctrlutils::cufileops::_owLaunch {app path {f ""}} {
     if {[catch {exec {*}$app $path &} e]} {
-        ::tkutils::tkudialog::showError "Could not open with '$app':\n$e"
+        _dlg $f showError "Could not open with '$app':\n$e"
         return 0
     }
     return 1
@@ -448,9 +482,9 @@ proc ::ctrlutils::cufileops::openWithDefault {f entry} {
     set app [owDefault [_owKey [dict get $entry name]]]
     if {[string trim $app] eq ""} return
     if {[catch {_localPath $f $entry} path]} {
-        ::tkutils::tkudialog::showError "Could not read file:\n$path" ; return
+        _dlg $f showError "Could not read file:\n$path" ; return
     }
-    _owLaunch $app $path
+    _owLaunch $app $path $f
 }
 
 # "Open with..." dialog: shows the apps registered for this file's extension,
@@ -569,9 +603,9 @@ proc ::ctrlutils::cufileops::_owDlgOpen {f entry dlg lb ext} {
     }
     if {$app eq ""} return
     if {[catch {_localPath $f $entry} path]} {
-        ::tkutils::tkudialog::showError "Could not read file:\n$path" ; return
+        _dlg $f showError "Could not read file:\n$path" ; return
     }
-    if {[_owLaunch $app $path]} { destroy $dlg }
+    if {[_owLaunch $app $path $f]} { destroy $dlg }
 }
 
 # True if the currently selected list row is a suggestion (not yet registered).
@@ -633,13 +667,13 @@ proc ::ctrlutils::cufileops::_owDlgRemove {dlg lb ext} {
 
 proc ::ctrlutils::cufileops::newFolder {f} {
     variable state
-    set name [::tkutils::tkudialog::input -title "New Folder" \
+    set name [_dlg $f input -title "New Folder" \
         -message "Name of the new folder:"]
     if {$name eq ""} return
     set dir [_curDir $f]
     set path [_join $dir $name]
     if {[catch {$state($f,prov) mkdir $path} e]} {
-        ::tkutils::tkudialog::showError "Could not create folder:\n$e"
+        _dlg $f showError "Could not create folder:\n$e"
         return
     }
     _notify $f [dict create op mkdir path $path]
@@ -649,14 +683,14 @@ proc ::ctrlutils::cufileops::newFolder {f} {
 proc ::ctrlutils::cufileops::rename {f entry} {
     variable state
     set old [dict get $entry name]
-    set name [::tkutils::tkudialog::input -title "Rename" \
+    set name [_dlg $f input -title "Rename" \
         -message "New name for '$old':" -initial $old]
     if {$name eq "" || $name eq $old} return
     set dir [_curDir $f]
     set from [dict get $entry path]
     set to   [_join $dir $name]
     if {[catch {$state($f,prov) move $from $to} e]} {
-        ::tkutils::tkudialog::showError "Could not rename:\n$e"
+        _dlg $f showError "Could not rename:\n$e"
         return
     }
     _notify $f [dict create op rename from $from to $to \
@@ -677,7 +711,7 @@ proc ::ctrlutils::cufileops::delete {f args} {
     } else {
         set msg "Delete [llength $entries] items?"
     }
-    if {![::tkutils::tkudialog::confirm $msg]} return
+    if {![_dlg $f confirm $msg]} return
     set prov $state($f,prov)
     foreach entry $entries {
         set path [dict get $entry path]
@@ -687,7 +721,7 @@ proc ::ctrlutils::cufileops::delete {f args} {
         set saved ""
         catch {set saved [_snapshot $prov $path $type]}
         if {[catch {$prov delete $path} e]} {
-            ::tkutils::tkudialog::showError "Could not delete '[dict get $entry name]':\n$e"
+            _dlg $f showError "Could not delete '[dict get $entry name]':\n$e"
             continue
         }
         _notify $f [dict create op delete path $path type $type saved $saved]
@@ -789,16 +823,16 @@ proc ::ctrlutils::cufileops::paste {f {targetDir ""}} {
         set to [_uniqueName $dst $dir $name]
         if {$type eq "dir"} {
             if {[catch {_copyTree $src $from $dst $to} e]} {
-                ::tkutils::tkudialog::showError "Could not paste folder:\n$e"
+                _dlg $f showError "Could not paste folder:\n$e"
                 continue
             }
         } else {
             if {[catch {$src get $from} data]} {
-                ::tkutils::tkudialog::showError "Could not read source:\n$data"
+                _dlg $f showError "Could not read source:\n$data"
                 continue
             }
             if {[catch {$dst put $to $data} e]} {
-                ::tkutils::tkudialog::showError "Could not paste:\n$e"
+                _dlg $f showError "Could not paste:\n$e"
                 continue
             }
         }
@@ -809,7 +843,7 @@ proc ::ctrlutils::cufileops::paste {f {targetDir ""}} {
             set saved ""
             catch {set saved [_snapshot $src $from $type]}
             if {[catch {$src delete $from} e]} {
-                ::tkutils::tkudialog::showError "Copied, but could not remove the source:\n$e"
+                _dlg $f showError "Copied, but could not remove the source:\n$e"
                 _notify $f [dict create op paste path $to type $type]
                 continue
             }
@@ -879,4 +913,4 @@ proc ::ctrlutils::cufileops::_refresh {f} {
     if {$state($f,refresh) ne ""} { uplevel #0 $state($f,refresh) }
 }
 
-package provide ctrlutils::cufileops 0.1
+package provide ctrlutils::cufileops 0.2

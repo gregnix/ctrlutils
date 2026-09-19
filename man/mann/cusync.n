@@ -1,0 +1,73 @@
+.TH cusync n 0.1 ctrlutils
+.SH ctrlutils::cusync
+.PP
+A controller that compares two directory trees and mirrors one onto the other. Each tree lives on its own \fBtuprovider\fR, so \fBlocal <\-> ZIP <\-> SFTP <\-> WebDAV\fR combinations all work. Sync is \fBone\-way\fR and \fBnon\-destructive\fR by default: it copies missing entries and updates newer/differing ones, but it never deletes on the target. There is no Tk here \-\- the Explorer supplies the dialog and the progress bar; cusync is pure model/controller logic.
+.SS API
+.CS
+package require ctrlutils::cusync
+
+::ctrlutils::cusync::compare  $provL $dirL $provR $dirR        ;# -> list of diff dicts
+::ctrlutils::cusync::plan     $diffs $direction               ;# -> list of action dicts
+::ctrlutils::cusync::apply    $srcProv $srcDir $dstProv $dstDir $actions \
+                              ?-ondir cb? ?-onfile cb?         ;# -> {done N errors {..}}
+::ctrlutils::cusync::applyOne $srcProv $srcDir $dstProv $dstDir $action ;# -> {ok 0|1 ?error msg?}
+.CE
+.PP
+The flow is always \fBcompare \-> plan \-> apply\fR: compare tells you how the two sides differ, plan turns that into a copy list for one direction, apply (or \fBapplyOne\fR in a loop) executes it.
+.SS compare
+.PP
+\fBcompare $provL $dirL $provR $dirR\fR walks both trees and returns a flat list of diff dicts, parents before children. Each diff dict has:
+.TS
+l l.
+Key	Meaning
+\fBrel\fR	path relative to the two roots, \fB/\fR\-separated, no leading slash
+\fBname\fR	leaf name
+\fBstatus\fR	see below
+\fBltype\fR	\fBfile\fR, \fBdir\fR, or \fB""\fR if absent on the left
+\fBrtype\fR	\fBfile\fR, \fBdir\fR, or \fB""\fR if absent on the right
+.TE
+.PP
+\fBstatus\fR is one of:
+.TS
+l l.
+Status	Meaning
+\fBonlyLeft\fR	present only on the left
+\fBonlyRight\fR	present only on the right
+\fBnewerLeft\fR	on both, left mtime is newer
+\fBnewerRight\fR	on both, right mtime is newer
+\fBdiff\fR	on both, same mtime but different size
+\fBsame\fR	on both, same mtime and size
+\fBconflict\fR	one side is a file, the other a directory
+.TE
+.PP
+Left\-only directories are recursed into, so every file underneath gets its own diff entry (and can be mirrored).
+.SS plan
+.PP
+\fBplan $diffs $direction\fR turns diffs into a list of action dicts for one direction. \fBdirection\fR is \fBLR\fR (left is the source) or \fBRL\fR (right is the source). Each action dict is \fB{op copy rel <path> type file|dir}\fR.
+.PP
+A plan copies, in the chosen direction, the entries that are \fBmissing\fR on the target plus the ones that are \fBnewer or differing\fR on the source. It never emits a delete and never pulls the target\-only side across \-\- an \fBLR\fR plan ignores \fBonlyRight\fR, an \fBRL\fR plan ignores \fBonlyLeft\fR. That is what makes sync non\-destructive: run it and the target only ever gains or refreshes files.
+.SS "apply / applyOne"
+.PP
+\fBapply $srcProv $srcDir $dstProv $dstDir $actions\fR executes a plan: directories are created, files are read from the source and written to the target (parent directories are created as needed). It returns \fB{done N errors {msg ...}}\fR \-\- \fBdone\fR counts successful actions, \fBerrors\fR collects per\-action messages so a partial failure does not abort the whole run.
+.PP
+Optional \fB\-ondir\fR / \fB\-onfile\fR callbacks receive the \fBrel\fR path before each action, for progress reporting. They are invoked at global scope; errors in a callback are ignored.
+.PP
+\fBapplyOne $srcProv $srcDir $dstProv $dstDir $action\fR runs a single action and returns \fB{ok 1}\fR or \fB{ok 0 error <msg>}\fR. It is factored out so a UI can step through a plan one action at a time (via \fBafter\fR), keeping the event loop live for a progress bar and a Cancel button instead of freezing. \fBapply\fR is just a loop over \fBapplyOne\fR.
+.PP
+For local\-to\-local copies the source mtime is preserved on a best\-effort basis so repeated mirrors are idempotent; this is silently skipped for zip/dav/sftp targets.
+.SS Example
+.CS
+package require ctrlutils::cusync
+
+set L [tclutils::tuprovider open local]
+set R [tclutils::tuprovider open local]
+
+set diffs [::ctrlutils::cusync::compare $L /home/me/src $R /backup/src]
+set plan  [::ctrlutils::cusync::plan $diffs LR]
+set res   [::ctrlutils::cusync::apply $L /home/me/src $R /backup/src $plan \
+              -onfile [list puts]]
+puts "copied [dict get $res done], errors: [dict get $res errors]"
+.CE
+.SS "See also"
+.PP
+\fBcufileops\fR, \fBcuundo\fR, \fBtclutils::tuprovider\fR

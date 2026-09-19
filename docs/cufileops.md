@@ -23,6 +23,10 @@ package require ctrlutils::cufileops
 - `-onop script` -- optional; called with an operation-record dict after each
   successful operation, so an observer such as `cuundo` can record it for undo.
 
+An unknown option is an error that lists the known ones,
+`{CTRLUTILS CUFILEOPS OPTION <opt>}` (0.2; up to 0.1 a typo such as `-onpo`
+was swallowed and silently disabled undo).
+
 ## Operations
 
 The context menu and shortcuts route to these (also callable directly):
@@ -31,10 +35,11 @@ The context menu and shortcuts route to these (also callable directly):
 ::ctrlutils::cufileops::newFolder $f
 ::ctrlutils::cufileops::openFile  $f $entry   ;# open with the OS default app
 ::ctrlutils::cufileops::openWith  $f $entry   ;# open with a program the user names
+::ctrlutils::cufileops::openWithDefault $f $entry  ;# open with the default app registered for the extension, no dialog
 ::ctrlutils::cufileops::rename    $f $entry
-::ctrlutils::cufileops::delete    $f $entry
-::ctrlutils::cufileops::copy      $f $entry
-::ctrlutils::cufileops::cut       $f $entry
+::ctrlutils::cufileops::delete    $f ?$entry ...?
+::ctrlutils::cufileops::copy      $f ?$entry ...?   ;# one or more entries (multi-select)
+::ctrlutils::cufileops::cut       $f ?$entry ...?
 ::ctrlutils::cufileops::paste     $f
 ```
 
@@ -46,6 +51,16 @@ written to a temp file that keeps the original extension, so the opener picks th
 right application.
 
 Shortcuts on the list: Delete, F2 (rename), Ctrl+C (copy), Ctrl+X (cut), Ctrl+V (paste).
+
+## Dialogs belong to the view's window (0.2)
+
+Every prompt, confirmation and error dialog (New Folder, Rename, Delete, paste
+and open failures) is opened with `-parent` set to the toplevel of the view's
+list, so it is transient to that window and centred over it. Up to 0.1 no
+dialog got a parent and `tkudialog` 0.1 put each one in the middle of the
+screen — with the Explorer on a second monitor, on the other one. Measured
+2026-09-19: Explorer window at 860,560, the New Folder prompt centred over it.
+Needs `tkutils::tkudialog` 0.2.
 
 ## Capability-driven
 
@@ -79,7 +94,10 @@ A command may include its own arguments (e.g. `code -w`); the file path is
 appended when launching. The "Open with..." dialog lists the apps for the
 selected file's type, marks the default, and lets you Open, Add, Remove, or Set
 as default. When a default is set for a type, the right-click menu shows an
-"Open with <app>" entry that opens it in one click. Double-click still uses the
+"Open with <app>" entry that opens it in one click. That entry calls
+`openWithDefault`, which launches the registered default for the file's
+extension directly. If no default is registered it does nothing (the menu
+only offers the entry when there is one). Double-click still uses the
 OS default opener (this registry is a menu-only convenience).
 
 Registry API (pure, no Tk needed once loaded):

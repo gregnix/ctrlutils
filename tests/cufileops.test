@@ -11,13 +11,21 @@ tcl::tm::path add [file join $root .. tkutils lib tm]
 # loaded when Tk is present. Gate the load behind the Tk constraint so a
 # headless "tclsh some.test" run skips these tests cleanly instead of erroring
 # out at load time.
-if {![catch {package require Tk}]
- && ![catch {package require ctrlutils::cufileops}]
- && ![catch {package require tkutils::tkufilelist}]} {
+set tkPresent [expr {![catch {package require Tk}]}]
+set loadErr ""
+if {$tkPresent
+ && ![catch {package require ctrlutils::cufileops} loadErr]
+ && ![catch {package require tkutils::tkufilelist} loadErr]} {
     testConstraint haveTk 1
+    set loadErr ""
 } else {
     testConstraint haveTk 0
 }
+# Tk is there but the modules did not load: a failure, not a skip.
+testConstraint tkPresent $tkPresent
+test cufileops-0.0 {the modules load when Tk is available} -constraints tkPresent -body {
+    set ::loadErr
+} -result {}
 package require tclutils::tuprovider
 
 # A tiny read-only in-memory provider, defined inline so the cross-provider
@@ -262,8 +270,13 @@ test cufileops-3.7 {a Tcl editor on PATH is suggested first for .tcl} -constrain
     set exe [file join $bindir alited]
     set ch [open $exe w] ; puts $ch "#!/bin/sh\necho alited" ; close $ch
     catch {file attributes $exe -permissions 0755}
+    set ::savedPath $::env(PATH)
     set ::env(PATH) "$bindir:$::env(PATH)"
-    auto_reset
+    # Clear only the auto_execok cache. Up to ctrlutils 0.1 this called
+    # auto_reset, which also deletes every auto-loaded proc -- Tablelist's
+    # among them; the next tablelist widget in this interpreter then failed
+    # with 'can't set "scalingpct": the variable is read-only'.
+    array unset ::auto_execs
 } -body {
     set sug [::ctrlutils::cufileops::_owSuggest .tcl]
     # alited (from the tcleditor category) must be present and come first
@@ -272,6 +285,64 @@ test cufileops-3.7 {a Tcl editor on PATH is suggested first for .tcl} -constrain
     catch {file delete $::ctrlutils::cufileops::owFile}
     set ::ctrlutils::cufileops::owFile ""
     catch {file delete -force [file join [tcltest::temporaryDirectory] owbin7]}
+    set ::env(PATH) $::savedPath
+    array unset ::auto_execs
 } -result alited
+
+# --- 0.2: dialogs open over the view's own window ---------------------------
+# Up to 0.1 no tkudialog call got -parent, and every prompt/error/confirmation
+# opened in the middle of the screen -- on a second monitor, the wrong one.
+proc findDialog {} {
+    foreach w [winfo children .] {
+        if {[string match .tkudialog* $w] && [winfo exists $w]} { return $w }
+    }
+    return ""
+}
+
+test cufileops-9.1 {newFolder prompts over the Explorer window, transient to it} -constraints haveTk -setup {
+    catch {destroy .ex}
+    toplevel .ex
+    wm geometry .ex 400x300+860+560
+    set prov [::tclutils::tuprovider open local]
+    ::tkutils::tkufilelist::widget .ex.fl -provider $prov -dir $::tgt
+    pack .ex.fl -fill both -expand 1
+    ::ctrlutils::cufileops::install tabP $prov .ex.fl {}
+    update
+} -body {
+    set ::meas {}
+    # The Explorer window is measured where it really is, at the same moment
+    # as the dialog: under a decorating window manager its content does not
+    # sit at the requested +860+560 (openbox: +1+20).
+    after 300 {
+        set d [findDialog]
+        set ::meas [list [expr {[winfo rootx $d] + [winfo width $d] / 2}] \
+                         [expr {[winfo rooty $d] + [winfo height $d] / 2}] \
+                         [expr {[winfo rootx .ex] + [winfo width .ex] / 2}] \
+                         [expr {[winfo rooty .ex] + [winfo height .ex] / 2}] \
+                         [wm transient $d]]
+        ::tkutils::tkudialog::choose $d Cancel
+    }
+    ::ctrlutils::cufileops::newFolder tabP
+    lassign $::meas cx cy ex ey tr
+    list [expr {abs($cx - $ex) <= 2}] [expr {abs($cy - $ey) <= 2}] $tr
+} -cleanup {
+    destroy .ex
+} -result {1 1 .ex}
+
+test cufileops-9.2 {_dlgParent is the toplevel of the view's list} -constraints haveTk -setup {
+    catch {destroy .ex2}
+    toplevel .ex2
+    set prov [::tclutils::tuprovider open local]
+    ::tkutils::tkufilelist::widget .ex2.fl -provider $prov -dir $::tgt
+    ::ctrlutils::cufileops::install tabQ $prov .ex2.fl {}
+} -body {
+    list [::ctrlutils::cufileops::_dlgParent tabQ] [::ctrlutils::cufileops::_dlgParent unknownTab]
+} -cleanup { destroy .ex2 } -result {.ex2 {}}
+
+test cufileops-9.3 {install: unknown option is an error that names the known ones} -constraints haveTk -body {
+    set prov [::tclutils::tuprovider open local]
+    catch {::ctrlutils::cufileops::install tabR $prov .nolist {} -onpo x} m o
+    list [dict get $o -errorcode] [string match "*Known: -onop" $m]
+} -result {{CTRLUTILS CUFILEOPS OPTION -onpo} 1}
 
 cleanupTests

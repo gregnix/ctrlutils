@@ -23,17 +23,65 @@ set appdir [expr {$explorerTcl eq "" ? "" : [file dirname $explorerTcl]}]
 set haveTk [expr {![catch {package require Tk}]}]
 if {$haveTk} { catch {wm withdraw .} }
 
+# Module paths: this repo's lib/tm plus the sibling tclutils and tkutils trees
+# (TCLUTILS_TM / TKUTILS_TM take precedence). Up to ctrlutils 0.1 the test
+# relied on the environment alone; without it explorer.tcl could not find its
+# packages.
+set repoRoot ""
+if {$appdir ne ""} {
+    set repoRoot [file normalize [file join $appdir .. ..]]
+    tcl::tm::path add [file join $repoRoot .. tclutils lib tm]
+    tcl::tm::path add [file join $repoRoot .. tkutils lib tm]
+    tcl::tm::path add [file join $repoRoot lib tm]
+}
+if {[info exists ::env(TKUTILS_TM)]}  { tcl::tm::path add $::env(TKUTILS_TM) }
+if {[info exists ::env(TCLUTILS_TM)]} { tcl::tm::path add $::env(TCLUTILS_TM) }
+
 # load the explorer namespace without auto-running main (argv0 mismatch)
+#
+# explorer.tcl reports a missing package in a MODAL tk_messageBox and then
+# calls `exit 1`. In a test run the box waits for a click that never comes:
+# up to ctrlutils 0.1 the suite hung here (measured 2026-09-19). While the file
+# is sourced, both commands are replaced -- the box records its text, exit
+# raises it as an error -- and restored right afterwards, so later tests in
+# this interpreter see the real ones.
 set ::argv0 __explorer_smoke__
 set loadErr ""
+proc ::smokeStubMessageBox {args} {
+    set m ""
+    if {[dict exists $args -message]} { set m [dict get $args -message] }
+    set ::smokeBoxText $m
+    return ok
+}
+proc ::smokeStubExit {{code 0}} {
+    set m "explorer.tcl called exit $code"
+    if {[info exists ::smokeBoxText] && $::smokeBoxText ne ""} {
+        append m ": " $::smokeBoxText
+    }
+    error $m
+}
 if {$explorerTcl eq ""} {
     set ok 0
     set loadErr "explorer.tcl not found; tried: $candidates"
-} elseif {[catch {source $explorerTcl} e]} {
-    set ok 0
-    set loadErr $e
 } else {
-    set ok 1
+    set haveBox [expr {[info commands ::tk_messageBox] ne ""}]
+    if {$haveBox} { rename ::tk_messageBox ::smokeRealMessageBox }
+    rename ::smokeStubMessageBox ::tk_messageBox
+    rename ::exit ::smokeRealExit
+    rename ::smokeStubExit ::exit
+    try {
+        if {[catch {source $explorerTcl} e]} {
+            set ok 0
+            set loadErr $e
+        } else {
+            set ok 1
+        }
+    } finally {
+        rename ::exit {}
+        rename ::smokeRealExit ::exit
+        rename ::tk_messageBox {}
+        if {$haveBox} { rename ::smokeRealMessageBox ::tk_messageBox }
+    }
 }
 testConstraint core $ok
 testConstraint tk [expr {$haveTk && $ok}]
