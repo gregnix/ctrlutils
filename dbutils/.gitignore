@@ -1,6 +1,0 @@
-# internal dev docs, never committed
-nogit/
-
-# generated diagram output from the demo
-examples/*.png
-*.svg

@@ -390,10 +390,7 @@ proc ::explorer::_closeWindow {w} {
     variable tab
     foreach f [dict keys $tab] {
         if {[_win $f] ne $w} continue
-        catch {::ctrlutils::cumonitor::stop $f}
-        if {[dict exists $tab $f tmpfile]} { catch {file delete [dict get $tab $f tmpfile]} }
-        if {[dict exists $tab $f pdfimg]}  { catch {::image delete [dict get $tab $f pdfimg]} }
-        dict unset tab $f
+        _releaseTab $f
     }
     unset -nocomplain ::explorer::statustext($w)
     catch {destroy $w}
@@ -2186,21 +2183,46 @@ proc ::explorer::onTabSelect {f} {
 }
 
 # Keep at least one tab open.
-proc ::explorer::onTabClose {f} {
+proc ::explorer::_provInUse {prov {except ""}} {
     variable tab
+    foreach t [dict keys $tab] {
+        if {$t eq $except} continue
+        if {![dict exists $tab $t prov]} continue
+        if {[dict get $tab $t prov] eq $prov} { return 1 }
+    }
+    return 0
+}
+
+# Drop one tab's monitor, preview temps and provider. The provider is destroyed
+# only when no other tab still holds the same object (two tabs can share one).
+proc ::explorer::_releaseTab {f} {
+    variable tab
+    if {![dict exists $tab $f]} return
     catch {::ctrlutils::cumonitor::stop $f}
-    # clean up this tab's preview temp file and rendered PDF page, if any
     if {[dict exists $tab $f tmpfile]} {
         catch {file delete [dict get $tab $f tmpfile]}
     }
     if {[dict exists $tab $f pdfimg]} {
         catch {::image delete [dict get $tab $f pdfimg]}
     }
-    set w [_win $f]
-    if {[winfo exists $w] && [::tkutils::tkutab::count [_wp $w tabs]] <= 1} {
-        after idle [list ::explorer::newTab $w]
+    if {[dict exists $tab $f prov]} {
+        set prov [dict get $tab $f prov]
+        if {![_provInUse $prov $f]} {
+            catch {$prov destroy}
+            variable firstProv
+            if {$firstProv eq $prov} { set firstProv "" }
+        }
     }
     dict unset tab $f
+}
+
+proc ::explorer::onTabClose {f} {
+    set w ""
+    catch {set w [_win $f]}
+    _releaseTab $f
+    if {$w ne "" && [winfo exists $w] && [::tkutils::tkutab::count [_wp $w tabs]] <= 1} {
+        after idle [list ::explorer::newTab $w]
+    }
 }
 
 # Per-window status line. $w defaults to the main window; handlers that hold a

@@ -112,18 +112,60 @@ test cufileops-2.3 {paste collision picks a (copy) name} -constraints haveTk -se
     catch {file delete [file join $::tgt {doc (copy).txt}]}
 } -result 1
 
+# showError waits; tests that refuse a cap stub _dlg so they do not hang.
+proc stubDlg {} {
+    set ::dlgCalls {}
+    rename ::ctrlutils::cufileops::_dlg ::ctrlutils::cufileops::_dlgSaved
+    proc ::ctrlutils::cufileops::_dlg {f cmd args} {
+        lappend ::dlgCalls [list $cmd {*}$args]
+        return
+    }
+}
+proc unstubDlg {} {
+    catch {rename ::ctrlutils::cufileops::_dlg {}}
+    catch {rename ::ctrlutils::cufileops::_dlgSaved ::ctrlutils::cufileops::_dlg}
+}
+
 test cufileops-2.4 {cut is refused on a read-only source (no delete cap)} -constraints haveTk -setup {
     set src [MemSource new {/doc.txt {x}}]
     ::tkutils::tkufilelist::widget .cz -provider $src -dir /
     ::ctrlutils::cufileops::install czTab $src .cz {}
     set ::ctrlutils::cufileops::clip {}
+    stubDlg
 } -body {
     ::ctrlutils::cufileops::cut czTab \
         [dict create name doc.txt path /doc.txt type file size 1]
-    ::ctrlutils::cufileops::_haveClip
+    list [::ctrlutils::cufileops::_haveClip] $::dlgCalls
 } -cleanup {
+    unstubDlg
     destroy .cz ; $src destroy ; set ::ctrlutils::cufileops::clip {}
-} -result 0
+} -result {0 {{showError {Cut is not available here (the source cannot delete).}}}}
+
+test cufileops-2.10 {Delete key says so when the source cannot delete} -constraints haveTk -setup {
+    set src [MemSource new {/doc.txt {x}}]
+    ::tkutils::tkufilelist::widget .kd -provider $src -dir /
+    ::ctrlutils::cufileops::install kdTab $src .kd {}
+    stubDlg
+} -body {
+    ::ctrlutils::cufileops::_keyDelete kdTab
+    set ::dlgCalls
+} -cleanup {
+    unstubDlg
+    destroy .kd ; $src destroy
+} -result {{showError {Delete is not available here (the source cannot delete).}}}
+
+test cufileops-2.11 {Ctrl+X says so when the source cannot delete} -constraints haveTk -setup {
+    set src [MemSource new {/doc.txt {x}}]
+    ::tkutils::tkufilelist::widget .kx -provider $src -dir /
+    ::ctrlutils::cufileops::install kxTab $src .kx {}
+    stubDlg
+} -body {
+    ::ctrlutils::cufileops::_keyCut kxTab
+    set ::dlgCalls
+} -cleanup {
+    unstubDlg
+    destroy .kx ; $src destroy
+} -result {{showError {Cut is not available here (the source cannot delete).}}}
 
 test cufileops-2.5 {cross-provider cut moves the file and removes the source} -constraints haveTk -setup {
     set srcdir [file join $::tgt cutsrc] ; file mkdir $srcdir
@@ -149,18 +191,21 @@ test cufileops-2.5 {cross-provider cut moves the file and removes the source} -c
 } -result {1 0}
 
 
-test cufileops-2.1 {_localPath returns a local file path as-is} -constraints haveTk -setup {
+test cufileops-2.6 {_localPath returns a local file path as-is} -constraints haveTk -setup {
     set d [makeDirectory ow]
     set fh [open [file join $d a.txt] w] ; puts -nonewline $fh hi ; close $fh
+    set lp [::tclutils::tuprovider open local]
+    namespace eval ::ctrlutils::cufileops { variable state }
+    set ::ctrlutils::cufileops::state(loc,prov) $lp
 } -body {
     set entry [dict create name a.txt path [file join $d a.txt] type file size 2]
-    set lp [::ctrlutils::cufileops::_localPath any $entry]
-    string equal $lp [file join $d a.txt]
+    set got [::ctrlutils::cufileops::_localPath loc $entry]
+    string equal $got [file join $d a.txt]
 } -cleanup {
     catch {file delete [file join $d a.txt]}
 } -result 1
 
-test cufileops-2.2 {_localPath materializes provider bytes to a temp file} -constraints haveTk -setup {
+test cufileops-2.7 {_localPath materializes provider bytes under the process dir} -constraints haveTk -setup {
     proc ::testprov {method args} { if {$method eq "get"} { return "BYTES" } }
     namespace eval ::ctrlutils::cufileops { variable state }
     set ::ctrlutils::cufileops::state(tt,prov) ::testprov
@@ -168,11 +213,60 @@ test cufileops-2.2 {_localPath materializes provider bytes to a temp file} -cons
     set entry [dict create name doc.pdf path /in/zip/doc.pdf type file size 5]
     set lp [::ctrlutils::cufileops::_localPath tt $entry]
     set ch [open $lp rb] ; set got [read $ch] ; close $ch
-    list [string match *.pdf $lp] $got
+    list [string match */cufileops-[pid]-* $lp] \
+         [string match *.pdf $lp] $got
 } -cleanup {
     catch {file delete $lp}
     rename ::testprov ""
-} -result {1 BYTES}
+} -result {1 1 BYTES}
+
+test cufileops-2.8 {_localPath does not open a colliding local file for a non-local provider} -constraints haveTk -setup {
+    set ::collide [file join $::tgt collide.txt]
+    set fh [open $::collide w] ; puts -nonewline $fh LOCAL ; close $fh
+    proc ::zipish {method args} {
+        if {$method eq "get"} { return "ZIPBYTES" }
+    }
+    namespace eval ::ctrlutils::cufileops { variable state }
+    set ::ctrlutils::cufileops::state(zp,prov) ::zipish
+} -body {
+    set entry [dict create name collide.txt path $::collide type file size 8]
+    set lp [::ctrlutils::cufileops::_localPath zp $entry]
+    set ch [open $lp rb] ; set got [read $ch] ; close $ch
+    set fh [open $::collide r] ; set still [read $fh] ; close $fh
+    list [string equal $lp $::collide] $got $still
+} -cleanup {
+    catch {file delete $lp}
+    catch {file delete $::collide}
+    rename ::zipish ""
+} -result {0 ZIPBYTES LOCAL}
+
+test cufileops-2.9 {_copyTree rolls back a half-copied folder} -constraints haveTk -setup {
+    oo::class create FailSrc {
+        superclass ::tclutils::tuprovider::Base
+        method list {dir} {
+            if {$dir eq "/d"} {
+                return [list \
+                    [dict create name a.txt path /d/a.txt type file] \
+                    [dict create name b.txt path /d/b.txt type file]]
+            }
+            return [list [dict create name d path /d type dir]]
+        }
+        method get {path} {
+            if {$path eq "/d/b.txt"} { error "boom" }
+            return OK
+        }
+        method stat {path} { return [dict create name [file tail $path] path $path type file] }
+    }
+    set ::fsrc [FailSrc new]
+    set ::flp [::tclutils::tuprovider open local]
+    set ::destdir [file join $::tgt rolled]
+} -body {
+    set rc [catch {::ctrlutils::cufileops::_copyTree $::fsrc /d $::flp $::destdir} e]
+    list $rc [file exists $::destdir] [file exists [file join $::destdir a.txt]]
+} -cleanup {
+    catch {$::fsrc destroy}
+    catch {file delete -force $::destdir}
+} -result {1 0 0}
 
 
 test cufileops-3.1 {open-with registry: add apps and read them back} -constraints haveTk -setup {

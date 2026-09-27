@@ -118,11 +118,26 @@ Measured 2026-09-19 without any module path in the environment, under
 `xvfb-run` without a window manager and under icewm (8 test files): 67 passed, 0 skipped,
 0 failed on Tcl/Tk 9.0.4 and 8.6.14, `all.tcl` exit 0.
 
-### Not changed in this release
+### Open uses the local disk only for the local provider (2026-09-23)
 
-Temp files written by "Open" for provider-backed files are still not removed;
-`_copyTree` still leaves a partial folder when it fails midway; `dbutils/` is
-still in this repository. See the review of 2026-09-19.
+`_localPath` used `file exists` on the provider path. A ZIP or remote path that
+also existed on disk opened **that local file**. Saving from the opener then
+changed the wrong file. Only `::tclutils::tuprovider::Local` may return a
+disk path; every other provider writes `get` bytes into a process directory
+`cufileops-<pid>-…`. The directory is removed on `exit`; stale sibling
+directories are removed at first use (dead pid, or older than a day). The
+`explorer-<pid>-<clicks>` name is gone.
+
+`_copyTree` removes the paths it created on the destination if a later
+`get`/`put`/`mkdir` fails, so a half-copied folder does not stay behind.
+
+Cut (`cut`, Ctrl+X) and Delete on a source without `delete` show an error
+dialog instead of a silent return.
+
+Closing an Explorer tab (or a secondary window) destroys that tab's
+provider unless another tab still holds the same object.
+
+`dbutils/` is not part of this repository.
 
 ## 0.1
 

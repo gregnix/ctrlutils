@@ -43,6 +43,8 @@ namespace eval ::ctrlutils::cufileops {
     variable owFile  ""                ;# explicit config file path (tests set this)
     variable owCache ""                ;# in-memory copy of the registry dict
     variable owLoaded 0
+    variable workdir ""                ;# process-private temp dir for Open
+    variable exitHook 0
 }
 
 # Path to the registry file. Uses an explicit override if set, else tuopen's
@@ -255,8 +257,9 @@ proc ::ctrlutils::cufileops::install {f prov listwidget refreshcmd args} {
     bind $tbl.body <Button-3> "$handler %x %y %X %Y ; break"
 
     # Keyboard shortcuts on the list body, routed to the same operations. Each
-    # handler checks caps and the selection, so a key that does not apply here
-    # simply does nothing. Delete still asks for confirmation.
+    # handler checks caps and the selection. Cut and Delete say so when the
+    # source cannot delete; other keys that do not apply simply do nothing.
+    # Delete still asks for confirmation when the cap is there.
     bind $tbl.body <Delete>    "[list ::ctrlutils::cufileops::_keyDelete $f] ; break"
     bind $tbl.body <F2>        "[list ::ctrlutils::cufileops::_keyRename $f] ; break"
     bind $tbl.body <Control-c> "[list ::ctrlutils::cufileops::_keyCopy   $f] ; break"
@@ -268,7 +271,10 @@ proc ::ctrlutils::cufileops::install {f prov listwidget refreshcmd args} {
 # ---- keyboard handlers (caps- and selection-aware) ------------------------
 proc ::ctrlutils::cufileops::_keyDelete {f} {
     variable state
-    if {"delete" ni [$state($f,prov) caps]} return
+    if {"delete" ni [$state($f,prov) caps]} {
+        _dlg $f showError "Delete is not available here (the source cannot delete)."
+        return
+    }
     set es [::tkutils::tkufilelist::selectedEntries $state($f,list)]
     if {[llength $es]} { delete $f {*}$es }
 }
@@ -289,7 +295,10 @@ proc ::ctrlutils::cufileops::_keyCopy {f} {
 proc ::ctrlutils::cufileops::_keyCut {f} {
     variable state
     set caps [$state($f,prov) caps]
-    if {"get" ni $caps || "delete" ni $caps} return
+    if {"get" ni $caps || "delete" ni $caps} {
+        _dlg $f showError "Cut is not available here (the source cannot delete)."
+        return
+    }
     set es [::tkutils::tkufilelist::selectedEntries $state($f,list)]
     if {[llength $es]} { cut $f {*}$es }
 }
@@ -419,28 +428,91 @@ proc ::ctrlutils::cufileops::_popup {f X Y} {
 
 # ---- operations -----------------------------------------------------------
 
+# True if $prov is the local-filesystem provider. A ZIP or remote path must
+# never be treated as a disk path, even when the same string exists locally.
+proc ::ctrlutils::cufileops::_isLocalProv {prov} {
+    expr {![catch {info object class $prov} c] \
+        && $c eq "::tclutils::tuprovider::Local"}
+}
+
 # Materialize an entry's bytes to a real local path so an external program can
-# open it. If the path is already an existing local file (local provider), it is
-# used as-is; otherwise the provider's bytes are written to a temp file whose
-# name keeps the original extension (so the opener picks the right app).
+# open it. Only the local provider may return the disk path as-is. Every other
+# provider writes bytes from `get` into the process temp directory.
 proc ::ctrlutils::cufileops::_localPath {f entry} {
     variable state
     set path [dict get $entry path]
-    if {[file exists $path]} { return $path }
-    set data [$state($f,prov) get $path]
-    set ext  [file extension [dict get $entry name]]
-    set tmp  [file join [_tmpdir] \
-                  "explorer-[pid]-[clock clicks]$ext"]
+    set prov $state($f,prov)
+    if {[_isLocalProv $prov] && [file exists $path] && [file isfile $path]} {
+        return $path
+    }
+    set data [$prov get $path]
+    set name [file tail [dict get $entry name]]
+    if {$name eq ""} { set name tmp }
+    set dir [_workdir]
+    set tmp [file join $dir $name]
+    if {[file exists $tmp]} {
+        set tmp [file join $dir [pid]-[clock clicks]-[file tail $name]]
+    }
     set ch [::open $tmp wb] ; puts -nonewline $ch $data ; close $ch
     return $tmp
 }
 
-# a tiny temp-dir helper without extra deps
+# Host temp (TMPDIR / TEMP / TMP / /tmp). Not the process workdir.
 proc ::ctrlutils::cufileops::_tmpdir {} {
     foreach v {TMPDIR TEMP TMP} {
         if {[info exists ::env($v)] && [file isdirectory $::env($v)]} { return $::env($v) }
     }
     return [expr {[file isdirectory /tmp] ? "/tmp" : [pwd]}]
+}
+
+proc ::ctrlutils::cufileops::_pidAlive {p} {
+    if {$p eq [pid]} { return 1 }
+    if {[file isdirectory /proc]} {
+        return [file isdirectory [file join /proc $p]]
+    }
+    return 0
+}
+
+# Drop leftover cufileops-* dirs from dead processes (or older than a day).
+proc ::ctrlutils::cufileops::_reapOldWorkdirs {} {
+    foreach d [glob -nocomplain -type d [file join [_tmpdir] cufileops-*]] {
+        set tail [file tail $d]
+        if {![regexp {^cufileops-([0-9]+)-} $tail -> p]} continue
+        set stale 0
+        if {![_pidAlive $p]} { set stale 1 }
+        if {[clock seconds] - [file mtime $d] > 86400} { set stale 1 }
+        if {$stale} { catch {file delete -force $d} }
+    }
+}
+
+proc ::ctrlutils::cufileops::_wipeWorkdir {} {
+    variable workdir
+    if {$workdir ne ""} {
+        catch {file delete -force $workdir}
+        set workdir ""
+    }
+}
+
+proc ::ctrlutils::cufileops::_hookExit {} {
+    variable exitHook
+    if {$exitHook} return
+    set exitHook 1
+    if {[llength [info commands ::exit]]} {
+        trace add execution ::exit enter [list apply {args {
+            catch {::ctrlutils::cufileops::_wipeWorkdir}
+        }}]
+    }
+}
+
+# One directory per process. Wiped on exit; stale siblings reaped at first use.
+proc ::ctrlutils::cufileops::_workdir {} {
+    variable workdir
+    if {$workdir ne "" && [file isdirectory $workdir]} { return $workdir }
+    _reapOldWorkdirs
+    set workdir [file join [_tmpdir] cufileops-[pid]-[clock microseconds]]
+    file mkdir $workdir
+    _hookExit
+    return $workdir
 }
 
 # Open a file with the OS default application.
@@ -799,7 +871,10 @@ proc ::ctrlutils::cufileops::copy {f args} {
 # get+put into the destination followed by delete on the source.
 proc ::ctrlutils::cufileops::cut {f args} {
     variable state ; variable clip
-    if {"delete" ni [$state($f,prov) caps]} return
+    if {"delete" ni [$state($f,prov) caps]} {
+        _dlg $f showError "Cut is not available here (the source cannot delete)."
+        return
+    }
     set clip [list items [_clipItems $f $args] cut 1]
     return
 }
@@ -862,16 +937,31 @@ proc ::ctrlutils::cufileops::paste {f {targetDir ""}} {
 # recursion). Works across providers, so a whole folder can be pulled out of a
 # ZIP into a local directory.
 proc ::ctrlutils::cufileops::_copyTree {src from dst to} {
+    set created {}
+    try {
+        _copyTreeInto $src $from $dst $to created
+    } on error {e} {
+        foreach p [lreverse $created] {
+            catch {$dst delete $p}
+        }
+        return -code error $e
+    }
+}
+
+proc ::ctrlutils::cufileops::_copyTreeInto {src from dst to createdVar} {
+    upvar 1 $createdVar created
     $dst mkdir $to
+    lappend created $to
     foreach e [$src list $from] {
         set nm [dict get $e name]
         if {$nm eq "." || $nm eq ".."} continue
         set childFrom [dict get $e path]
         set childTo   [_join $to $nm]
         if {[dict get $e type] eq "dir"} {
-            _copyTree $src $childFrom $dst $childTo
+            _copyTreeInto $src $childFrom $dst $childTo created
         } else {
             $dst put $childTo [$src get $childFrom]
+            lappend created $childTo
         }
     }
 }

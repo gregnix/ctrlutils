@@ -110,7 +110,7 @@ test explorer-3 {_previewHex reads only the cap for a large file} -constraints t
     package require tkutils::tkupreview
     ::tkutils::tkupreview::widget .pvsmoke
 } -body {
-    set p [::tclutils::tuprovider open local]
+    set p [::tclutils::tuprovider::open local]
     # instrument head: record the length requested
     set ::explorer::_smokeLen -1
     oo::objdefine $p method head {path len} {
@@ -133,7 +133,7 @@ test explorer-4 {a small file is shown whole (no truncation path)} -constraints 
     package require tkutils::tkupreview
     ::tkutils::tkupreview::widget .pvsmoke2
 } -body {
-    set p [::tclutils::tuprovider open local]
+    set p [::tclutils::tuprovider::open local]
     # small file: _previewHex takes the get() path, no error
     set r [catch {::explorer::_previewHex .f .pvsmoke2 "small" $p $small 5} e]
     list $r
@@ -154,7 +154,7 @@ test explorer-6 {_previewText caps a large file and shows it as plain text} -con
     package require tkutils::tkupreview
     ::tkutils::tkupreview::widget .pvt
 } -body {
-    set p [::tclutils::tuprovider open local]
+    set p [::tclutils::tuprovider::open local]
     set ::explorer::_smokeLen -1
     oo::objdefine $p method head {path len} {
         set ::explorer::_smokeLen $len
@@ -176,7 +176,7 @@ test explorer-7 {_previewText renders a small structured file with its kind} -co
     package require tkutils::tkupreview
     ::tkutils::tkupreview::widget .pvj
 } -body {
-    set p [::tclutils::tuprovider open local]
+    set p [::tclutils::tuprovider::open local]
     # small json: should call the json viewer without error
     set r [catch {::explorer::_previewText .f .pvj "small.json" $p $j [file size $j] json} e]
     list $r
@@ -212,11 +212,8 @@ test explorer-10 {openRemote rejects a non-URL} -constraints core -body {
 } -result 1
 
 test explorer-11 {openRemote derives scheme and start dir from the URL} -constraints core -body {
-    # stub tuprovider open so no real connection is attempted; capture the scheme
-    set orig [info commands ::tclutils::tuprovider]
-    # openRemote requires the provider package; sftp is registered already.
-    # We only check the parsing branch by intercepting `open`.
     set ::explorer::_probeScheme ""
+    rename ::tclutils::tuprovider ::tclutils::_tuproviderOrig
     proc ::tclutils::tuprovider {sub args} {
         if {$sub eq "open"} {
             set ::explorer::_probeScheme [lindex $args 0]
@@ -224,12 +221,16 @@ test explorer-11 {openRemote derives scheme and start dir from the URL} -constra
         }
     }
     proc ::fakeprov {args} {}
-    set res [::explorer::openRemote sftp://user@host:2222/remote/dir]
-    rename ::tclutils::tuprovider ""
-    rename ::fakeprov ""
-    list $::explorer::_probeScheme [lindex $res 1]
+    set rc [catch {
+        set res [::explorer::openRemote sftp://user@host:2222/remote/dir]
+        list $::explorer::_probeScheme [lindex $res 1]
+    } out]
+    catch {rename ::tclutils::tuprovider {}}
+    catch {rename ::tclutils::_tuproviderOrig ::tclutils::tuprovider}
+    catch {rename ::fakeprov {}}
+    if {$rc} { error $out }
+    set out
 } -result {sftp /remote/dir}
-
 
 test explorer-12 {preview switches exist with sane defaults} -constraints core -body {
     list $::explorer::previewOn \
@@ -298,5 +299,27 @@ test explorer-17 {allCapabilitiesOk reflects a forced-missing backend} -constrai
 } -cleanup {
     set ::explorer::caps $saved
 } -result 1
+
+test explorer-18 {_releaseTab destroys a provider no other tab uses} -constraints tk -setup {
+    package require tclutils::tuprovider
+} -body {
+    set p [::tclutils::tuprovider::open local]
+    dict set ::explorer::tab .relA prov $p
+    ::explorer::_releaseTab .relA
+    list [dict exists $::explorer::tab .relA] [expr {[catch {$p caps}] != 0}]
+} -result {0 1}
+
+test explorer-19 {_releaseTab keeps a provider still used by another tab} -constraints tk -setup {
+    package require tclutils::tuprovider
+} -body {
+    set p [::tclutils::tuprovider::open local]
+    dict set ::explorer::tab .relA prov $p
+    dict set ::explorer::tab .relB prov $p
+    ::explorer::_releaseTab .relA
+    set kept [expr {![catch {$p caps}]}]
+    ::explorer::_releaseTab .relB
+    list [dict exists $::explorer::tab .relA] \
+         [dict exists $::explorer::tab .relB] $kept [expr {[catch {$p caps}] != 0}]
+} -result {0 0 1 1}
 
 cleanupTests

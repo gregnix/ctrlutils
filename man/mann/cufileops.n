@@ -27,6 +27,7 @@ The context menu and shortcuts route to these (also callable directly):
 ::ctrlutils::cufileops::newFolder $f
 ::ctrlutils::cufileops::openFile  $f $entry   ;# open with the OS default app
 ::ctrlutils::cufileops::openWith  $f $entry   ;# open with a program the user names
+::ctrlutils::cufileops::openWithDefault $f $entry  ;# open with the default app registered for the extension, no dialog
 ::ctrlutils::cufileops::rename    $f $entry
 ::ctrlutils::cufileops::delete    $f ?$entry ...?
 ::ctrlutils::cufileops::copy      $f ?$entry ...?   ;# one or more entries (multi-select)
@@ -34,7 +35,7 @@ The context menu and shortcuts route to these (also callable directly):
 ::ctrlutils::cufileops::paste     $f
 .CE
 .PP
-For a file the provider can read, the menu also offers \fBOpen\fR (launch the OS default application via \fBtclutils::tuopen\fR, falling back to xdg\-open/open/start) and \fBOpen with...\fR (prompt for a program and run it with the file). A local file opens in place; a provider\-backed file (in a ZIP, on WebDAV/FTP) is first written to a temp file that keeps the original extension, so the opener picks the right application.
+For a file the provider can read, the menu also offers \fBOpen\fR (launch the OS default application via \fBtclutils::tuopen\fR, falling back to xdg\-open/open/start) and \fBOpen with...\fR (prompt for a program and run it with the file). \fBOnly\fR\fB \fR\fBthe local filesystem provider\fR opens a path that already exists on disk. A ZIP or remote path that happens to exist locally is never used: bytes come from \fBget\fR and go into a process\-private directory (\fBcufileops\-<pid>\-…\fR under TMPDIR). That directory is removed when the process exits; leftover directories from crashed processes are removed on the next Open. Cut (the procedure or Ctrl+X) and Delete on a source without \fBdelete\fR show an error instead of doing nothing.
 .PP
 Shortcuts on the list: Delete, F2 (rename), Ctrl+C (copy), Ctrl+X (cut), Ctrl+V (paste).
 .SS "Dialogs belong to the view's window (0.2)"
@@ -55,7 +56,7 @@ Each extension maps to a list of launcher commands and one optional default:
 .PP
 Even before anything is registered the dialog is not empty: it lists \fBdetected\fR\fB \fR\fBapplications\fR installed on the system that suit the file's type (editors for text, image viewers for images, PDF viewers for \fB.pdf\fR, browsers for HTML, ...), found via \fBauto_execok\fR. Tcl source files (\fB.tcl\fR, \fB.tm\fR, \fB.test\fR, ...) suggest a Tcl editor (alited) first, then the general editors. These appear marked "(suggested)"; picking one opens the file and promotes it to a permanent entry for that type. There is also a "Browse..." button to choose any executable from disk.
 .PP
-A command may include its own arguments (e.g. \fBcode \-w\fR); the file path is appended when launching. The "Open with..." dialog lists the apps for the selected file's type, marks the default, and lets you Open, Add, Remove, or Set as default. When a default is set for a type, the right\-click menu shows an "Open with " entry that opens it in one click. Double\-click still uses the OS default opener (this registry is a menu\-only convenience).
+A command may include its own arguments (e.g. \fBcode \-w\fR); the file path is appended when launching. The "Open with..." dialog lists the apps for the selected file's type, marks the default, and lets you Open, Add, Remove, or Set as default. When a default is set for a type, the right\-click menu shows an "Open with " entry that opens it in one click. That entry calls \fBopenWithDefault\fR, which launches the registered default for the file's extension directly. If no default is registered it does nothing (the menu only offers the entry when there is one). Double\-click still uses the OS default opener (this registry is a menu\-only convenience).
 .PP
 Registry API (pure, no Tk needed once loaded):
 .CS

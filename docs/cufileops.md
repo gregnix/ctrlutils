@@ -45,10 +45,14 @@ The context menu and shortcuts route to these (also callable directly):
 
 For a file the provider can read, the menu also offers **Open** (launch the OS
 default application via `tclutils::tuopen`, falling back to xdg-open/open/start)
-and **Open with...** (prompt for a program and run it with the file). A local
-file opens in place; a provider-backed file (in a ZIP, on WebDAV/FTP) is first
-written to a temp file that keeps the original extension, so the opener picks the
-right application.
+and **Open with...** (prompt for a program and run it with the file). **Only
+the local filesystem provider** opens a path that already exists on disk. A
+ZIP or remote path that happens to exist locally is never used: bytes come from
+`get` and go into a process-private directory (`cufileops-<pid>-…` under
+TMPDIR). That directory is removed when the process exits; leftover directories
+from crashed processes are removed on the next Open. Cut (the procedure or
+Ctrl+X) and Delete on a source without `delete` show an error instead of
+doing nothing.
 
 Shortcuts on the list: Delete, F2 (rename), Ctrl+C (copy), Ctrl+X (cut), Ctrl+V (paste).
 
