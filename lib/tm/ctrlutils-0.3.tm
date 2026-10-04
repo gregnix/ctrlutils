@@ -23,13 +23,13 @@
 package require Tcl 8.6-
 
 namespace eval ::ctrlutils {
-    variable version 0.2
+    variable version 0.3
 }
 
-package require ctrlutils::cufileops
+package require ctrlutils::cufileops 0.3
 package require ctrlutils::cumonitor
 package require ctrlutils::cufilter
 package require ctrlutils::cuundo
 package require ctrlutils::cusync
 
-package provide ctrlutils 0.2
+package provide ctrlutils 0.3

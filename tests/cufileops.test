@@ -361,11 +361,19 @@ test cufileops-3.7 {a Tcl editor on PATH is suggested first for .tcl} -constrain
     # create a fake "alited" on PATH so detection finds it, regardless of host
     set bindir [file join [tcltest::temporaryDirectory] owbin7]
     file mkdir $bindir
-    set exe [file join $bindir alited]
-    set ch [open $exe w] ; puts $ch "#!/bin/sh\necho alited" ; close $ch
-    catch {file attributes $exe -permissions 0755}
+    if {$::tcl_platform(platform) eq "windows"} {
+        # auto_execok finds programs through PATHEXT there
+        set exe [file join $bindir alited.bat]
+        set ch [open $exe w] ; puts $ch "@echo alited" ; close $ch
+        set sep ";"
+    } else {
+        set exe [file join $bindir alited]
+        set ch [open $exe w] ; puts $ch "#!/bin/sh\necho alited" ; close $ch
+        catch {file attributes $exe -permissions 0755}
+        set sep ":"
+    }
     set ::savedPath $::env(PATH)
-    set ::env(PATH) "$bindir:$::env(PATH)"
+    set ::env(PATH) "[file nativename $bindir]$sep$::env(PATH)"
     # Clear only the auto_execok cache. Up to ctrlutils 0.1 this called
     # auto_reset, which also deletes every auto-loaded proc -- Tablelist's
     # among them; the next tablelist widget in this interpreter then failed

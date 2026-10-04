@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.3
+
+Recommended pairing: tclutils 0.64.0 + tkutils 0.46.0 + ctrlutils 0.3
+(`cufileops` needs `tkutils::tkudialog` 0.3).
+
+### `cufileops` 0.3 — multi-select on right-click (2026-10-02)
+
+Right-click used to synthesize Button-1 and shrink an extended selection to one
+row. Now: if the row under the pointer was already selected, the multi-selection
+is kept (file-manager behaviour). Requires `tkudialog` 0.3.
+
+### Tests / runner (2026-10-03)
+
+- `tests/all.tcl`: per-file wall-clock limit (`CTRLUTILS_TESTGRENZE`, default 120 s).
+- `tests/all.tcl` now calls `tclutils::tutestrun` (tclutils 0.64.0).
+- `cufileops-3.7`: the fake `alited` is a `.bat` on Windows and PATH uses `;`.
+
 ## 0.2
 
 First release with a changelog. Recommended pairing: tclutils 0.63.0 +

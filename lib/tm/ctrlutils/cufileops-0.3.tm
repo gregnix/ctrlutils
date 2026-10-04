@@ -26,7 +26,7 @@
 #     refreshcmd  a script run after a successful change (re-reads the dir)
 
 package require tkutils::tkucontextmenu
-package require tkutils::tkudialog 0.2
+package require tkutils::tkudialog 0.3
 # tuopen (open a file with the OS default app) is optional: if it is not on the
 # path, the "Open" entry falls back to launching via exec, and only "Open
 # with..." (which uses exec directly) is offered.
@@ -324,11 +324,25 @@ proc ::ctrlutils::cufileops::_curDir {f} {
 # not -- the classic tablelist coordinate mismatch. Deferring to tablelist's
 # own selection avoids guessing the offset.
 proc ::ctrlutils::cufileops::_rightclick {f tbl x y X Y} {
+    # Snapshot before the synthetic click: a plain Button-1 replaces an
+    # extended multi-selection with one row. File-manager behaviour: if the
+    # clicked row was already selected, keep the whole selection.
+    set before [$tbl curselection]
     event generate $tbl.body <Button-1> -x $x -y $y
     event generate $tbl.body <ButtonRelease-1> -x $x -y $y
-    # the selection change is processed in the event loop; pop up after it has
-    # settled so the menu reflects the row actually clicked.
-    after idle [list ::ctrlutils::cufileops::_popup $f $X $Y]
+    after idle [list ::ctrlutils::cufileops::_rightclickIdle $f $tbl $before $X $Y]
+}
+
+proc ::ctrlutils::cufileops::_rightclickIdle {f tbl before X Y} {
+    set clicked [lindex [$tbl curselection] 0]
+    if {$clicked ne "" && [llength $before] > 1 && $clicked in $before} {
+        $tbl selection clear 0 end
+        foreach r $before {
+            $tbl selection set $r
+        }
+        catch {$tbl activate $clicked}
+    }
+    ::ctrlutils::cufileops::_popup $f $X $Y
 }
 
 proc ::ctrlutils::cufileops::_popup {f X Y} {
@@ -1003,4 +1017,4 @@ proc ::ctrlutils::cufileops::_refresh {f} {
     if {$state($f,refresh) ne ""} { uplevel #0 $state($f,refresh) }
 }
 
-package provide ctrlutils::cufileops 0.2
+package provide ctrlutils::cufileops 0.3

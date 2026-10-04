@@ -1,7 +1,7 @@
 # ctrlutils -- the controller layer
 
-Version **0.2** (see `CHANGELOG.md`). Recommended pairing: tclutils 0.63.0 +
-tkutils 0.44.0 + ctrlutils 0.2.
+Version **0.3** (see `CHANGELOG.md`). Recommended pairing: tclutils 0.64.0 +
+tkutils 0.46.0 + ctrlutils 0.3.
 
 ctrlutils is the third repo alongside `tclutils` and `tkutils`. It holds
 **controllers**: modules that wire events on existing widgets to operations on a
