@@ -11,11 +11,20 @@ package require ctrlutils::cufilter
 
 ::ctrlutils::cufilter::widget $path $listwidget   ;# build the filter box
 ::ctrlutils::cufilter::clear  $path               ;# empty it, show all
+::ctrlutils::cufilter::lastError $path            ;# message of the last failure, or ""
 ```
 
 - `widget $path $listwidget` -- create a filter entry at `$path`, wired to
   `$listwidget` (a `tkufilelist`). Returns `$path`.
 - `clear $path` -- empty the box and return focus to the list.
+- `lastError $path` -- the message of the last filter that could not be
+  applied; empty after a successful one.
+
+A filter that cannot be applied (the list is gone, or it is not a
+`tkufilelist`) puts the entry into the ttk state `invalid`, sends
+`<<CufilterError>>` to `$path` and keeps the message for `lastError`. There
+is no dialog: the filter runs on every keystroke (0.2; up to 0.1 the error was
+caught silently).
 
 ## Filtering
 

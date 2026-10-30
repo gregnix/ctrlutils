@@ -1,4 +1,4 @@
-.TH cusync n 0.1 ctrlutils
+.TH cusync n 0.3 ctrlutils
 .SH ctrlutils::cusync
 .PP
 A controller that compares two directory trees and mirrors one onto the other. Each tree lives on its own \fBtuprovider\fR, so \fBlocal <\-> ZIP <\-> SFTP <\-> WebDAV\fR combinations all work. Sync is \fBone\-way\fR and \fBnon\-destructive\fR by default: it copies missing entries and updates newer/differing ones, but it never deletes on the target. There is no Tk here \-\- the Explorer supplies the dialog and the progress bar; cusync is pure model/controller logic.
@@ -41,6 +41,10 @@ Status	Meaning
 .TE
 .PP
 Left\-only directories are recursed into, so every file underneath gets its own diff entry (and can be mirrored).
+.PP
+\fBsame\fR compares metadata only: same size and same mtime. Two files with equal metadata and different contents count as \fBsame\fR; cusync reads no contents.
+.PP
+A directory that exists on a side but cannot be listed raises \fB{CTRLUTILS CUSYNC LIST side dir}\fR (\fBside\fR is \fBL\fR or \fBR\fR). Up to 0.2 the error was caught and that side counted as empty, so a failed listing of the target turned every source file into a copy over it. A subtree that is only on one side is not listed on the other.
 .SS plan
 .PP
 \fBplan $diffs $direction\fR turns diffs into a list of action dicts for one direction. \fBdirection\fR is \fBLR\fR (left is the source) or \fBRL\fR (right is the source). Each action dict is \fB{op copy rel <path> type file|dir}\fR.

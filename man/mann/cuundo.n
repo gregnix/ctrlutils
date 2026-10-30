@@ -1,4 +1,4 @@
-.TH cuundo n 0.2 ctrlutils
+.TH cuundo n 0.5 ctrlutils
 .SH ctrlutils::cuundo
 .PP
 A controller that provides undo/redo for the file operations \fBcufileops\fR performs. cufileops emits an operation record after each successful op (through its \fB\-onop\fR callback); cuundo records those on an undo stack and reverses them on request, with a redo stack so a reversal can itself be redone. The two stay decoupled \-\- cufileops does not know cuundo exists, it just reports what it did.
@@ -6,7 +6,7 @@ A controller that provides undo/redo for the file operations \fBcufileops\fR per
 .CS
 package require ctrlutils::cuundo
 
-::ctrlutils::cuundo::install $f $prov ?-list widget?
+::ctrlutils::cuundo::install $f $prov ?-list widget? ?-refresh script?
 ::ctrlutils::cuundo::record  $f $recordDict     ;# the -onop target
 ::ctrlutils::cuundo::undo    $f
 ::ctrlutils::cuundo::redo    $f
@@ -14,7 +14,7 @@ package require ctrlutils::cuundo
 ::ctrlutils::cuundo::clear   $f
 .CE
 .IP \(bu
-\fBinstall $f $prov\fR \-\- set up undo/redo state for the view \fB$f\fR, reversing through \fB$prov\fR. \fB\-list widget\fR binds Ctrl+Z / Ctrl+Y (and Ctrl+Shift+Z) on the list body. An unknown option is an error listing the known ones, \fB{CTRLUTILS CUUNDO OPTION <opt>}\fR (0.2; up to 0.1 a typo like \fB\-lst\fR silently lost the key bindings).
+\fBinstall $f $prov\fR \-\- set up undo/redo state for the view \fB$f\fR, reversing through \fB$prov\fR. \fB\-list widget\fR binds Ctrl+Z / Ctrl+Y (and Ctrl+Shift+Z) on the list body. An unknown option is an error listing the known ones, \fB{CTRLUTILS CUUNDO OPTION <opt>}\fR (0.2; up to 0.1 a typo like \fB\-lst\fR silently lost the key bindings). \fB\-refresh script\fR runs after each undo and redo; without it cuundo calls \fBcufileops::refresh $f\fR, the refresh script given to cufileops for the same view. A failing refresh is an error \fB{CTRLUTILS CUUNDO REFRESH}\fR; the step itself is done (0.5; up to 0.4 cuundo called the private \fBcufileops::_refresh\fR inside \fBcatch\fR).
 .IP \(bu
 \fBrecord $f $rec\fR \-\- record an operation. Pass it to cufileops as \fB\-onop [list ctrlutils::cuundo::record $f]\fR. New activity clears the redo stack.
 .IP \(bu

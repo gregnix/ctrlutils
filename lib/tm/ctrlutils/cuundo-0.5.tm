@@ -26,11 +26,21 @@
 #   ctrlutils::cuundo::redo $f
 #   ctrlutils::cuundo::canUndo $f  ;# / canRedo
 #
+# Options of install: -list widget (key bindings), -refresh script (run after
+# an undo or redo; default: cufileops::refresh of the same view). A failing
+# refresh is an error {CTRLUTILS CUUNDO REFRESH}; the step itself is done.
+# Up to 0.4 cuundo called the private cufileops::_refresh inside catch, so a
+# failure left the list showing the old state without a word.
+#
 # Binds Ctrl+Z / Ctrl+Shift+Z (and Ctrl+Y) on the list body when a widget is
 # given.
 
 package require Tcl 8.6-
-package require tclutils::tuprovider
+# No tclutils::tuprovider here: cuundo only calls methods of the provider
+# object it is given (up to 2026-10-20 it required the package without
+# using it).
+
+catch {package require msgcat}
 
 namespace eval ::ctrlutils::cuundo {
     variable state
@@ -45,17 +55,18 @@ proc ::ctrlutils::cuundo::install {f prov args} {
             "missing value for option \"[lindex $args end]\""
     }
     foreach {k v} $args {
-        if {$k ni {-list}} {
+        if {$k ni {-list -refresh}} {
             return -code error -errorcode [list CTRLUTILS CUUNDO OPTION $k] \
-                "unknown option \"$k\"\nKnown: -list"
+                "unknown option \"$k\"\nKnown: -list, -refresh"
         }
     }
-    array set o {-list ""}
+    array set o {-list "" -refresh ""}
     array set o $args
     set state($f,prov) $prov
     set state($f,undo) {}
     set state($f,redo) {}
     set state($f,list) $o(-list)
+    set state($f,refresh) $o(-refresh)
     if {$o(-list) ne ""} {
         set b $o(-list).tbl.body
         bind $b <Control-z>       "[list ::ctrlutils::cuundo::undo $f] ; break"
@@ -83,6 +94,27 @@ proc ::ctrlutils::cuundo::canRedo {f} {
     expr {[info exists state($f,redo)] && [llength $state($f,redo)] > 0}
 }
 
+# _ text ?arg ...? -- user-visible text through msgcat (when loaded), with
+# format-style %s arguments; see cufileops.
+proc ::ctrlutils::cuundo::_ {s args} {
+    if {[llength [info commands ::msgcat::mc]]} {
+        return [::msgcat::mc $s {*}$args]
+    }
+    if {[llength $args]} { return [format $s {*}$args] }
+    return $s
+}
+
+# -parent for the error dialogs: the toplevel of the list widget, as in
+# cufileops. Without it the dialog could open behind the application window.
+proc ::ctrlutils::cuundo::_dlgParent {f} {
+    variable state
+    if {[info exists state($f,list)] && $state($f,list) ne ""
+            && [winfo exists $state($f,list)]} {
+        return [list -parent [winfo toplevel $state($f,list)]]
+    }
+    return {}
+}
+
 proc ::ctrlutils::cuundo::undo {f} {
     variable state
     if {![canUndo $f]} return
@@ -90,7 +122,8 @@ proc ::ctrlutils::cuundo::undo {f} {
     set state($f,undo) [lrange $state($f,undo) 0 end-1]
     # _reverse may annotate rec (e.g. snapshot a created path) so redo is exact.
     if {[catch {_reverse $f rec} e]} {
-        catch {::tkutils::tkudialog::showError "Undo failed:\n$e"}
+        catch {::tkutils::tkudialog::showError [_ "Undo failed:\n%s" $e] \
+            {*}[_dlgParent $f]}
         # put it back so the stack is not lost on a failed undo
         lappend state($f,undo) $rec
         return
@@ -105,7 +138,10 @@ proc ::ctrlutils::cuundo::redo {f} {
     set rec [lindex $state($f,redo) end]
     set state($f,redo) [lrange $state($f,redo) 0 end-1]
     if {[catch {_apply $f $rec} e]} {
-        catch {::tkutils::tkudialog::showError "Redo failed:\n$e"}
+        catch {::tkutils::tkudialog::showError [_ "Redo failed:\n%s" $e] \
+            {*}[_dlgParent $f]}
+        # put it back, as undo does: a failed redo must not lose the step
+        lappend state($f,redo) $rec
         return
     }
     lappend state($f,undo) $rec
@@ -142,16 +178,16 @@ proc ::ctrlutils::cuundo::_reverse {f recVar} {
             # provider). The source snapshot was taken by cufileops at cut time.
             set sp [dict get $r srcprov] ; set dp [dict get $r dstprov]
             set saved [dict get $r saved]
-            if {$saved eq ""} { error "no saved content to restore the source" }
+            if {$saved eq ""} { error [_ "no saved content to restore the source"] }
             $dp delete [dict get $r to]
             ::ctrlutils::cuundo::_restore $sp [dict get $r from] $saved
         }
         delete {
             set saved [dict get $r saved]
-            if {$saved eq ""} { error "no saved content to restore" }
+            if {$saved eq ""} { error [_ "no saved content to restore"] }
             ::ctrlutils::cuundo::_restore $p [dict get $r path] $saved
         }
-        default { error "cannot undo op [dict get $r op]" }
+        default { error [_ "cannot undo op %s" [dict get $r op]] }
     }
 }
 
@@ -167,7 +203,7 @@ proc ::ctrlutils::cuundo::_apply {f rec} {
             } else { $p mkdir [dict get $rec path] }
         }
         paste  {
-            if {![dict exists $rec snap]} { error "cannot redo paste (no snapshot)" }
+            if {![dict exists $rec snap]} { error [_ "cannot redo paste (no snapshot)"] }
             ::ctrlutils::cuundo::_restore $p [dict get $rec path] [dict get $rec snap]
         }
         movex  {
@@ -175,19 +211,29 @@ proc ::ctrlutils::cuundo::_apply {f rec} {
             # (from the source snapshot) and delete it at the source again.
             set sp [dict get $rec srcprov] ; set dp [dict get $rec dstprov]
             set saved [dict get $rec saved]
-            if {$saved eq ""} { error "cannot redo move (no snapshot)" }
+            if {$saved eq ""} { error [_ "cannot redo move (no snapshot)"] }
             ::ctrlutils::cuundo::_restore $dp [dict get $rec to] $saved
             $sp delete [dict get $rec from]
         }
         delete { $p delete [dict get $rec path] }
-        default { error "cannot redo op [dict get $rec op]" }
+        default { error [_ "cannot redo op %s" [dict get $rec op]] }
     }
 }
 
 proc ::ctrlutils::cuundo::_refresh {f} {
     variable state
-    # reuse cufileops' refresh path if the app wired one through the list
-    catch {::ctrlutils::cufileops::_refresh $f}
+    if {[info exists state($f,refresh)] && $state($f,refresh) ne ""} {
+        set cmd [list uplevel #0 $state($f,refresh)]
+    } elseif {[llength [info commands ::ctrlutils::cufileops::refresh]]} {
+        # the refresh script the app gave cufileops for the same view
+        set cmd [list ::ctrlutils::cufileops::refresh $f]
+    } else {
+        return
+    }
+    if {[catch $cmd e]} {
+        return -code error -errorcode {CTRLUTILS CUUNDO REFRESH} \
+            "list not refreshed: $e"
+    }
 }
 
 # Snapshot / restore a path's content through the provider. These are pure
@@ -223,4 +269,4 @@ proc ::ctrlutils::cuundo::_join {dir name} {
     return "[string trimright $dir /]/$name"
 }
 
-package provide ctrlutils::cuundo 0.2
+package provide ctrlutils::cuundo 0.5

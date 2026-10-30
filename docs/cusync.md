@@ -51,6 +51,15 @@ diff dicts, parents before children. Each diff dict has:
 Left-only directories are recursed into, so every file underneath gets its own
 diff entry (and can be mirrored).
 
+`same` compares metadata only: same size and same mtime. Two files with equal
+metadata and different contents count as `same`; cusync reads no contents.
+
+A directory that exists on a side but cannot be listed raises
+`{CTRLUTILS CUSYNC LIST side dir}` (`side` is `L` or `R`). Up to 0.2 the error
+was caught and that side counted as empty, so a failed listing of the target
+turned every source file into a copy over it. A subtree that is only on one
+side is not listed on the other.
+
 ## plan
 
 `plan $diffs $direction` turns diffs into a list of action dicts for one

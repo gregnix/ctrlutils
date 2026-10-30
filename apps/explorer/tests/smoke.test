@@ -90,7 +90,11 @@ testConstraint tk [expr {$haveTk && $ok}]
 # skipping every constrained test. A suite that reports "0 run" for the
 # Explorer looks green but hides a broken layout; this unconstrained test
 # always runs and only fails when the load failed.
-test explorer-0-load {explorer.tcl is found and sourced} -body {
+# Needs a display: explorer.tcl loads Tk modules. Without one it is skipped
+# like the other Tk tests, instead of failing the run (2026-10-20).
+testConstraint haveTk $haveTk
+
+test explorer-0-load {explorer.tcl is found and sourced} -constraints haveTk -body {
     if {!$ok} { error $loadErr }
     set ok
 } -result 1

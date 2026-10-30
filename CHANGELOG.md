@@ -1,5 +1,77 @@
 # Changelog
 
+## 0.5 - Unreleased
+
+Recommended pairing: tclutils 0.69.0 + tkutils 0.49.0 + ctrlutils 0.5.
+
+Module versions: `cusync` 0.3, `cufileops` 0.6, `cuundo` 0.5, `cufilter` 0.2.
+When copying over an older tree, delete `ctrlutils-0.4.tm`, `cusync-0.2.tm`,
+`cufileops-0.5.tm`, `cuundo-0.4.tm`, `cufilter-0.1.tm`; from 0.3 also
+`cufileops-0.4.tm`, `cuundo-0.3.tm`, `cusync-0.1.tm` (they were still in the
+0.4 tree).
+
+- `cusync::compare`: a directory that cannot be listed is an error
+  `{CTRLUTILS CUSYNC LIST side dir}` (was an empty side; a failed listing of
+  the target turned every source file into a copy over it). Tests
+  `cusync-4.1`–`4.3`.
+- `cufileops::paste`: entries of a cut that could not be copied stay on the
+  clipboard (the whole cut was gone). New public `refresh`. Tests
+  `cufileops-13.1`, `13.2`.
+- `cuundo`: option `-refresh`; default `cufileops::refresh`; a failing
+  refresh is an error `{CTRLUTILS CUUNDO REFRESH}` (was the private
+  `_refresh` inside `catch`). Tests `cuundo-12.1`, `12.2`.
+- `cufilter`: a filter that cannot be applied marks the entry `invalid`,
+  sends `<<CufilterError>>` and keeps the message for `lastError` (was
+  caught silently). Tests `cufilter-10.1`, `10.2`.
+- Docs: `cusync` `same` compares size and mtime, not contents.
+- Explorer: the messages for a missing `cusync` or `tkutlfind` name the
+  module, not a file version (they said `cusync-0.2.tm`,
+  `tkutlfind-0.2.tm`).
+
+## 0.4 - 2026-10-20
+
+Recommended pairing: tclutils 0.66.0 + tkutils 0.47.0 + ctrlutils 0.4.
+
+Module versions: `cuundo` 0.4, `cusync` 0.2, `cufileops` 0.5. When copying
+over an older tree, delete `cuundo-0.3.tm`, `cusync-0.1.tm` and
+`cufileops-0.4.tm`.
+The umbrella now requires these versions (it asked for `cufileops` 0.3
+and no version for `cuundo`/`cusync`).
+
+Note on the section 0.3 below: `cufileops` 0.4 and `cuundo` 0.3 came after
+the umbrella 0.3 had been named and were never given an umbrella number of
+their own; they belong to 0.3 as delivered. From 0.4 on, every module bump
+goes with an umbrella bump.
+
+- `cuundo`: a failed redo kept the step on neither stack -- it was lost. It
+  goes back on the redo stack, as a failed undo does. Test `cuundo-1.10`.
+- `cufileops`: `package require tkutils::tkufilelist 0.2`. It called
+  `tkufilelist` without loading it and worked only when the caller had.
+- `cusync::apply`: unknown options are an error naming the known ones
+  (`-onfile -ondir`), as in the other controllers. Test `cusync-3.6`.
+- `cusync::applyOne`: copies the source mtime only when both providers are
+  the local provider. For a ZIP/DAV/SFTP target `file mtime` set the mtime
+  of a local file that merely had the target's path. Test `cusync-3.7`.
+- Tests: `cumonitor.test` works in the system temp directory (a run cut
+  short left `cumon/` in the tree); the Explorer smoke test skips its load
+  test without a display.
+- Comments and docs: `cusync` (no delete option), `cumonitor` (no Tk),
+  Explorer (one provider per tab), `cuundo.n` 0.3, `docs/cufileops.md`
+  (tkudialog 0.3, tkufilelist 0.2), README pairing.
+
+- `cuundo`: error dialogs get `-parent` (the list's toplevel), as in
+  cufileops; the reasons ("no saved content to restore", ...) go through
+  msgcat. No longer requires `tclutils::tuprovider` (it only calls the
+  provider object it is given). Test `cuundo-11.1`.
+- `cufileops::owSetApp name`: the application name for the "Open with"
+  registry. Every application stored under "explorer" and so shared one
+  registry; setting the variable after the first access did not reload.
+  Test `cufileops-12.1`.
+- `cufilter`: label "Filter:" and the clear button go through msgcat. Test
+  `cufilter-9.1`.
+- Explorer: a missing module at start names the module path as well as
+  auto_path (the modules are found through the module path).
+
 ## 0.3
 
 Recommended pairing: tclutils 0.64.0 + tkutils 0.46.0 + ctrlutils 0.3
@@ -10,6 +82,14 @@ Recommended pairing: tclutils 0.64.0 + tkutils 0.46.0 + ctrlutils 0.3
 Right-click used to synthesize Button-1 and shrink an extended selection to one
 row. Now: if the row under the pointer was already selected, the multi-selection
 is kept (file-manager behaviour). Requires `tkudialog` 0.3.
+
+### `cufileops` 0.4, `cuundo` 0.3 — texts through msgcat (2026-10-07)
+
+Menu items, prompts and error messages go through `msgcat` when loaded, like
+`tkudialog` 0.3; messages with a detail take `%s`. An application sets its
+language in `::ctrlutils`. Without a catalog nothing changes. The delete
+prompt is now one text per case ("Delete file '%s'?", "Delete folder
+'%s'?"). Tests `cufileops-10.1/10.2`, `cuundo-10.1`.
 
 ### Tests / runner (2026-10-03)
 

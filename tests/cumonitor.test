@@ -10,7 +10,17 @@ package require ctrlutils::cumonitor
 package require tclutils::tuprovider
 
 # a scratch directory to watch
-set ::wdir [makeDirectory cumon]
+# In the system temp directory, not relative to the cwd: a run cut short by
+# the time limit left ctrlutils/cumon/ in the working tree (2026-10-20).
+if {[info exists ::env(TMPDIR)]} {
+    set _tmpBase $::env(TMPDIR)
+} elseif {[info exists ::env(TEMP)]} {
+    set _tmpBase $::env(TEMP)
+} else {
+    set _tmpBase /tmp
+}
+set ::wdir [file join $_tmpBase cumon-[pid]]
+file mkdir $::wdir
 proc touchFile {name} {
     set p [file join $::wdir $name]
     set fh [open $p w] ; puts $fh x ; close $fh
@@ -90,4 +100,5 @@ test cumonitor-9.1 {install: unknown option names the known ones, with an errorc
     list [dict get $o -errorcode] [string match "*Known: -interval -onchange" $m]
 } -result {{CTRLUTILS CUMONITOR OPTION -intervall} 1}
 
+catch {file delete -force $::wdir}
 cleanupTests

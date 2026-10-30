@@ -169,10 +169,91 @@ test cuundo-1.9 {redo of a cross-provider move re-applies it} -setup {
     catch {file delete [file join $::dir mv2_src.txt] [file join $::dir mv2_dst.txt]}
 } -result {1 0}
 
+test cuundo-1.10 {a failed redo keeps the step on the redo stack} -setup {
+    set p [prov]
+    ::ctrlutils::cuundo::install t10 $p
+    set fh [open [file join $::dir c.txt] w] ; puts $fh hi ; close $fh
+} -body {
+    set from [file join $::dir c.txt]
+    set to   [file join $::dir d.txt]
+    $p move $from $to
+    ::ctrlutils::cuundo::record t10 [dict create op rename from $from to $to type file]
+    ::ctrlutils::cuundo::undo t10                 ;# d.txt -> c.txt
+    file delete $from                             ;# redo has nothing to move
+    ::ctrlutils::cuundo::redo t10                 ;# fails
+    ::ctrlutils::cuundo::canRedo t10
+} -cleanup {
+    ::ctrlutils::cuundo::clear t10
+    catch {file delete [file join $::dir c.txt] [file join $::dir d.txt]}
+} -result 1
+
 test cuundo-9.1 {install: unknown option is an error that names the known ones} -body {
     set p [::tclutils::tuprovider open local]
     catch {::ctrlutils::cuundo::install t9 $p -lst .x} m o
-    list [dict get $o -errorcode] [string match "*Known: -list" $m]
+    list [dict get $o -errorcode] [string match "*Known: -list, -refresh" $m]
 } -result {{CTRLUTILS CUUNDO OPTION -lst} 1}
+
+test cuundo-10.1 {texts go through msgcat with %s arguments} -setup {
+    package require msgcat
+    namespace eval ::ctrlutils { ::msgcat::mcset {} "Undo failed:\n%s" "Rueckgaengig fehlgeschlagen:\n%s" }
+} -body {
+    ::ctrlutils::cuundo::_ "Undo failed:\n%s" x
+} -cleanup {
+    namespace eval ::ctrlutils { ::msgcat::mcset {} "Undo failed:\n%s" "Undo failed:\n%s" }
+} -result "Rueckgaengig fehlgeschlagen:\nx"
+
+testConstraint haveTk [expr {![catch {package require Tk}]}]
+
+test cuundo-11.1 {failed undo: dialog gets -parent and a msgcat text} -constraints haveTk -setup {
+    wm withdraw .
+    frame .uw ; frame .uw.tbl ; frame .uw.tbl.body
+    namespace eval ::tkutils::tkudialog {}
+    set ::dlgArgs {}
+    proc ::tkutils::tkudialog::showError {args} { set ::dlgArgs $args }
+    namespace eval ::ctrlutils {
+        ::msgcat::mcset [::msgcat::mclocale] "no saved content to restore" "nichts gesichert"
+    }
+    set p [prov]
+    ::ctrlutils::cuundo::install t11 $p -list .uw
+} -body {
+    ::ctrlutils::cuundo::record t11 [dict create op delete path /nirgends type file saved ""]
+    ::ctrlutils::cuundo::undo t11
+    list [string match "*nichts gesichert*" [lindex $::dlgArgs 0]] \
+         [lrange $::dlgArgs 1 end]
+} -cleanup {
+    ::ctrlutils::cuundo::clear t11
+    rename ::tkutils::tkudialog::showError {}
+    destroy .uw
+} -result {1 {-parent .}}
+
+test cuundo-12.1 {-refresh runs after undo and redo (0.5)} -setup {
+    set p [prov]
+    set ::refN 0
+    ::ctrlutils::cuundo::install t12 $p -refresh {incr ::refN}
+} -body {
+    set d [file join $::dir made12]
+    $p mkdir $d
+    ::ctrlutils::cuundo::record t12 [dict create op mkdir path $d]
+    ::ctrlutils::cuundo::undo t12
+    ::ctrlutils::cuundo::redo t12
+    set ::refN
+} -cleanup {
+    ::ctrlutils::cuundo::clear t12
+    catch {file delete -force [file join $::dir made12]}
+} -result 2
+
+test cuundo-12.2 {a failing refresh is an error; the undo itself is done (0.5)} -setup {
+    set p [prov]
+    ::ctrlutils::cuundo::install t13 $p -refresh {error "list gone"}
+} -body {
+    set d [file join $::dir made13]
+    $p mkdir $d
+    ::ctrlutils::cuundo::record t13 [dict create op mkdir path $d]
+    set rc [catch {::ctrlutils::cuundo::undo t13} m o]
+    list $rc [dict get $o -errorcode] [exists $d] [::ctrlutils::cuundo::canRedo t13]
+} -cleanup {
+    ::ctrlutils::cuundo::clear t13
+    catch {file delete -force [file join $::dir made13]}
+} -result {1 {CTRLUTILS CUUNDO REFRESH} 0 1}
 
 cleanupTests

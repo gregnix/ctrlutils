@@ -71,4 +71,47 @@ test cufilter-1.4 {setFilter on the list is case-insensitive} -constraints haveT
     destroy .l4
 } -result 2
 
+test cufilter-9.1 {label and clear button go through msgcat} -constraints haveTk -setup {
+    namespace eval ::ctrlutils {
+        ::msgcat::mcset [::msgcat::mclocale] "Filter:" "Suche:"
+        ::msgcat::mcset [::msgcat::mclocale] "x" "×"
+    }
+} -body {
+    ::ctrlutils::cufilter::widget .mcf .gibtsnicht
+    list [.mcf.l cget -text] [.mcf.x cget -text]
+} -cleanup {
+    destroy .mcf
+    namespace eval ::ctrlutils {
+        ::msgcat::mcset [::msgcat::mclocale] "Filter:" "Filter:"
+        ::msgcat::mcset [::msgcat::mclocale] "x" "x"
+    }
+} -result [list Suche: \u00d7]
+
+test cufilter-10.1 {a filter that cannot be applied marks the entry and keeps the error (0.2)} -constraints haveTk -setup {
+    ::ctrlutils::cufilter::widget .ef .keineListe
+    set ::efErr 0
+    bind .ef <<CufilterError>> { incr ::efErr }
+} -body {
+    set ::ctrlutils::cufilter::state(.ef,text) "bericht"
+    ::ctrlutils::cufilter::_apply .ef
+    update
+    list [expr {[::ctrlutils::cufilter::lastError .ef] ne ""}] [.ef.e instate invalid] $::efErr
+} -cleanup {
+    destroy .ef
+} -result {1 1 1}
+
+test cufilter-10.2 {a working filter clears the error} -constraints haveTk -setup {
+    set prov [::tclutils::tuprovider open local]
+    ::tkutils::tkufilelist::widget .l10 -provider $prov -dir $::fdir
+    ::ctrlutils::cufilter::widget .f10 .l10
+    set ::ctrlutils::cufilter::state(.f10,error) alt
+    .f10.e state invalid
+} -body {
+    set ::ctrlutils::cufilter::state(.f10,text) "bericht"
+    ::ctrlutils::cufilter::_apply .f10
+    list [::ctrlutils::cufilter::lastError .f10] [.f10.e instate invalid]
+} -cleanup {
+    destroy .l10 .f10
+} -result {{} 0}
+
 cleanupTests

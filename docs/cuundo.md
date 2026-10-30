@@ -11,7 +11,7 @@ decoupled -- cufileops does not know cuundo exists, it just reports what it did.
 ```tcl
 package require ctrlutils::cuundo
 
-::ctrlutils::cuundo::install $f $prov ?-list widget?
+::ctrlutils::cuundo::install $f $prov ?-list widget? ?-refresh script?
 ::ctrlutils::cuundo::record  $f $recordDict     ;# the -onop target
 ::ctrlutils::cuundo::undo    $f
 ::ctrlutils::cuundo::redo    $f
@@ -23,7 +23,11 @@ package require ctrlutils::cuundo
   through `$prov`. `-list widget` binds Ctrl+Z / Ctrl+Y (and Ctrl+Shift+Z) on the
   list body. An unknown option is an error listing the known ones,
   `{CTRLUTILS CUUNDO OPTION <opt>}` (0.2; up to 0.1 a typo like `-lst` silently
-  lost the key bindings).
+  lost the key bindings). `-refresh script` runs after each undo and redo;
+  without it cuundo calls `cufileops::refresh $f`, the refresh script given to
+  cufileops for the same view. A failing refresh is an error
+  `{CTRLUTILS CUUNDO REFRESH}`; the step itself is done (0.5; up to 0.4 cuundo
+  called the private `cufileops::_refresh` inside `catch`).
 - `record $f $rec` -- record an operation. Pass it to cufileops as
   `-onop [list ctrlutils::cuundo::record $f]`. New activity clears the redo stack.
 - `undo` / `redo` -- reverse / re-apply the last operation.

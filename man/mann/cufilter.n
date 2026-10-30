@@ -1,4 +1,4 @@
-.TH cufilter n 0.1 ctrlutils
+.TH cufilter n 0.2 ctrlutils
 .SH ctrlutils::cufilter
 .PP
 A controller that provides a live filter box for a \fBtkufilelist\fR. As the user types, the list shows only matching files; directories always stay, so navigation still works while a filter is active.
@@ -8,11 +8,16 @@ package require ctrlutils::cufilter
 
 ::ctrlutils::cufilter::widget $path $listwidget   ;# build the filter box
 ::ctrlutils::cufilter::clear  $path               ;# empty it, show all
+::ctrlutils::cufilter::lastError $path            ;# message of the last failure, or ""
 .CE
 .IP \(bu
 \fBwidget $path $listwidget\fR \-\- create a filter entry at \fB$path\fR, wired to \fB$listwidget\fR (a \fBtkufilelist\fR). Returns \fB$path\fR.
 .IP \(bu
 \fBclear $path\fR \-\- empty the box and return focus to the list.
+.IP \(bu
+\fBlastError $path\fR \-\- the message of the last filter that could not be applied; empty after a successful one.
+.PP
+A filter that cannot be applied (the list is gone, or it is not a \fBtkufilelist\fR) puts the entry into the ttk state \fBinvalid\fR, sends \fB<<CufilterError>>\fR to \fB$path\fR and keeps the message for \fBlastError\fR. There is no dialog: the filter runs on every keystroke (0.2; up to 0.1 the error was caught silently).
 .SS Filtering
 .PP
 The typed text becomes a glob passed to \fBtkufilelist::setFilter\fR: bare text is wrapped as \fB*text*\fR so it matches as a substring; text containing \fB*\fR or \fB?\fR is used as a full glob. Matching is case\-insensitive. Escape or the clear button empties the box.

@@ -2,12 +2,13 @@
 # explorer.tcl -- the reference application for the provider framework.
 #
 # Deliberately thin: it wires together tkufiletree (tree), tkufilelist (list),
-# tkupath (breadcrumb) and tkutab (tabs) over a shared tuprovider. The
+# tkupath (breadcrumb) and tkutab (tabs) over tuproviders. The
 # framework does the work; this file connects the parts and holds the session.
 #
 # Multiple directories open at once, one per tab. Each tab has its own tree,
-# list, breadcrumb and current directory; all tabs share one provider (one
-# storage session). The same app works over local files or a ZIP archive --
+# list, breadcrumb, current directory and provider: "+" opens a fresh local
+# provider, a ZIP or remote URL its own. The same app works over local files
+# or a ZIP archive --
 # nothing here knows the difference.
 #
 #   wish explorer.tcl ?directory?
@@ -46,8 +47,10 @@ apply {{} {
 
 # Essential packages. If one is missing, a Windows GUI exe would otherwise show
 # a blank screen with NO error at all. So load each one guarded: on failure,
-# pop a message box naming the missing package and the auto_path that was
-# searched, then stop. Fail visibly instead of vanishing.
+# pop a message box naming the missing package and the places that were
+# searched, then stop. Fail visibly instead of vanishing. The required
+# packages are Tcl modules (.tm), found through the module path, not through
+# auto_path -- so both are listed (until 2026-10-20 only auto_path was).
 foreach pkg {
     tkutils::tkufiletree tkutils::tkufilelist tkutils::tkupath
     tkutils::tkutab tclutils::tuprovider tkutils::tkupreview
@@ -56,7 +59,7 @@ foreach pkg {
 } {
     if {[catch {package require $pkg} err]} {
         catch {tk_messageBox -icon error -title "Explorer cannot start" \
-            -message "Missing package:\n  $pkg\n\n$err\n\nSearched auto_path:\n[join $::auto_path \n]"}
+            -message "Missing package:\n  $pkg\n\n$err\n\nSearched module path (tcl::tm::path):\n[join [::tcl::tm::path list] \n]\n\nSearched auto_path:\n[join $::auto_path \n]"}
         exit 1
     }
 }
@@ -1241,7 +1244,7 @@ proc ::explorer::openSyncDialog {w {leftDir ""}} {
     variable tab
     variable haveSync
     if {!$haveSync} {
-        set msg "Sync needs the ctrlutils::cusync module.\n\nInstall cusync-0.1.tm next to the other ctrlutils\nmodules (ctrlutils/lib/tm/ctrlutils/) and restart."
+        set msg "Sync needs the ctrlutils::cusync module.\n\nInstall the cusync module next to the other ctrlutils\nmodules (ctrlutils/lib/tm/ctrlutils/) and restart."
         if {[catch {::tkutils::tkudialog::showError $msg -parent $w}]} {
             catch {tk_messageBox -parent $w -icon error -title "Sync unavailable" -message $msg}
         }
@@ -1566,7 +1569,7 @@ proc ::explorer::_findTbl {f} {
 proc ::explorer::_findInList {w} {
     variable haveListFind
     if {!$haveListFind} {
-        set msg "Find in list needs the tkutils::tkutlfind module.\n\nInstall tkutlfind-0.1.tm with the other tkutils modules."
+        set msg "Find in list needs the tkutils::tkutlfind module.\n\nInstall the tkutlfind module with the other tkutils modules."
         if {[catch {::tkutils::tkudialog::showError $msg -parent $w}]} {
             catch {tk_messageBox -parent $w -icon error -title "Find unavailable" -message $msg}
         }

@@ -1,6 +1,6 @@
 # cumonitor -- a provider-agnostic directory monitor.
 # Description: a provider-agnostic directory monitor (polling)
-# Category: Tk · controllers
+# Category: controllers (no Tk)
 #
 # Watches one directory through the provider interface and fires a callback
 # when its contents change (a file added, removed, resized, or re-timed). It

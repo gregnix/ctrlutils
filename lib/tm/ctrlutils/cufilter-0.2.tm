@@ -18,17 +18,36 @@
 #
 # The box also clears on Escape and refocuses the list, so filtering never traps
 # keyboard focus.
+#
+#   ctrlutils::cufilter::lastError $path            -- message of the last failure
+#
+# A filter that cannot be applied puts the entry into the ttk state "invalid",
+# sends <<CufilterError>> to $path and keeps the message for lastError; the
+# next successful filter clears it. Up to 0.1 the error was caught silently
+# (no dialog on purpose: the filter runs on every keystroke).
+
+catch {package require msgcat}
 
 namespace eval ::ctrlutils::cufilter {
     variable state
 }
 
+# _ text -- user-visible text through msgcat when loaded (as cufileops); an
+# application sets translations with ::msgcat::mcset in ::ctrlutils.
+proc ::ctrlutils::cufilter::_ {s args} {
+    if {[llength [info commands ::msgcat::mc]]} {
+        return [::msgcat::mc $s {*}$args]
+    }
+    if {[llength $args]} { return [format $s {*}$args] }
+    return $s
+}
+
 proc ::ctrlutils::cufilter::widget {path listwidget} {
     variable state
     ttk::frame $path
-    ttk::label $path.l -text "Filter:"
+    ttk::label $path.l -text [_ "Filter:"]
     ttk::entry $path.e -textvariable ::ctrlutils::cufilter::state($path,text)
-    ttk::button $path.x -text "x" -width 2 \
+    ttk::button $path.x -text [_ "x"] -width 2 \
         -command [list ::ctrlutils::cufilter::clear $path]
     pack $path.l -side left -padx {4 2}
     pack $path.e -side left -fill x -expand 1
@@ -63,8 +82,21 @@ proc ::ctrlutils::cufilter::_apply {path} {
     } else {
         set glob *$txt*      ;# bare text -> substring match
     }
-    catch {::tkutils::tkufilelist::setFilter [set state($path,list)] $glob}
+    if {[catch {::tkutils::tkufilelist::setFilter [set state($path,list)] $glob} e]} {
+        set state($path,error) $e
+        catch {$path.e state invalid}
+        event generate $path <<CufilterError>> -when tail
+    } else {
+        set state($path,error) ""
+        catch {$path.e state !invalid}
+    }
     return
 }
 
-package provide ctrlutils::cufilter 0.1
+proc ::ctrlutils::cufilter::lastError {path} {
+    variable state
+    if {[info exists state($path,error)]} { return $state($path,error) }
+    return ""
+}
+
+package provide ctrlutils::cufilter 0.2

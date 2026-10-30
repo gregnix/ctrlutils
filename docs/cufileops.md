@@ -41,6 +41,7 @@ The context menu and shortcuts route to these (also callable directly):
 ::ctrlutils::cufileops::copy      $f ?$entry ...?   ;# one or more entries (multi-select)
 ::ctrlutils::cufileops::cut       $f ?$entry ...?
 ::ctrlutils::cufileops::paste     $f
+::ctrlutils::cufileops::refresh   $f            ;# run the refresh script of install (0.6)
 ```
 
 For a file the provider can read, the menu also offers **Open** (launch the OS
@@ -64,7 +65,7 @@ list, so it is transient to that window and centred over it. Up to 0.1 no
 dialog got a parent and `tkudialog` 0.1 put each one in the middle of the
 screen — with the Explorer on a second monitor, on the other one. Measured
 2026-09-19: Explorer window at 860,560, the New Folder prompt centred over it.
-Needs `tkutils::tkudialog` 0.2.
+Needs `tkutils::tkudialog` 0.3 and `tkutils::tkufilelist` 0.2.
 
 ## Capability-driven
 
@@ -115,8 +116,18 @@ Registry API (pure, no Tk needed once loaded):
 ```
 
 `$ext` is a lowercase extension with the dot (".txt"); a file with no extension
-uses the empty key. Set `::ctrlutils::cufileops::owApp` to change the config
-sub-directory name, or `owFile` to point at an explicit file (tests do this).
+uses the empty key.
+
+The registry is stored per application name, by default `explorer`. Each
+application sets its own, before the first "Open with":
+
+```tcl
+::ctrlutils::cufileops::owSetApp dateiblick
+```
+
+Without it every application using cufileops shares one registry. `owSetApp`
+also drops the cached copy (setting the variable `owApp` directly after the
+first access did not). `owFile` points at an explicit file (tests do this).
 
 ## Cross-provider move (cut)
 
@@ -126,7 +137,11 @@ source. Because it deletes the source, cut is only offered when the source
 provider supports `delete` -- you cannot cut out of a read-only ZIP (copy still
 works). The move is emitted as a single `movex` operation record carrying both
 providers and a snapshot of the source, so undo restores the source and removes
-the target, and redo re-applies the move. A cut is consumed by its paste.
+the target, and redo re-applies the move. A cut is consumed by its paste,
+except for the entries that could not be copied: they stay on the clipboard
+as a cut, so paste can be repeated (0.6; up to 0.5 the whole cut was gone).
+An entry copied but not removed at the source is reported and not kept;
+pasting it again would make a second copy.
 
 ## Cross-provider copy
 
@@ -136,6 +151,21 @@ recursively) can be pulled out of a ZIP into a local directory. The clipboard
 remembers the *source* provider, so pasting into a view backed by a different
 provider triggers the cross-provider path. On a name collision, paste picks a
 free `name (copy).ext` rather than overwriting.
+
+## Language
+
+Menu items, prompts and error messages go through `msgcat` when it is loaded
+(since cufileops 0.5, cuundo 0.4). An application in another language sets them in
+the `::ctrlutils` namespace; messages with a detail take `%s`:
+
+```tcl
+namespace eval ::ctrlutils {
+    ::msgcat::mcset {} Rename Umbenennen
+    ::msgcat::mcset {} "Could not rename:\n%s" "Umbenennen fehlgeschlagen:\n%s"
+}
+```
+
+Without a catalog the texts stay English.
 
 ## See also
 

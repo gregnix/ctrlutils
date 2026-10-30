@@ -1,11 +1,11 @@
-# cusync-0.1.tm -- directory comparison and one-way mirroring over tuproviders.
+# cusync-0.3.tm -- directory comparison and one-way mirroring over tuproviders.
 # Description: directory compare and one-way mirroring over providers, no Tk
 # Category: Archive · filesystem
 #
 # Compares two directory trees (each on its own provider, so local <-> ZIP <->
 # SFTP <-> WebDAV all work) and mirrors newer/missing entries from one side to
-# the other. One-way and non-destructive by default: it copies and updates, it
-# never deletes on the target unless explicitly asked.
+# the other. One-way and non-destructive: it copies and updates, it never
+# deletes on the target (there is no option for that).
 #
 # Model/controller layer (cu*). No Tk here; the Explorer supplies the dialog.
 #
@@ -21,6 +21,11 @@
 # ("diff" = same mtime but different size; "conflict" = file vs dir mismatch).
 #
 # direction is LR (left is source) or RL (right is source).
+#
+# Errors: a directory that exists on a side but cannot be listed raises
+# {CTRLUTILS CUSYNC LIST side dir} (side L or R). Up to 0.2 the error was
+# caught and the side counted as empty: a failed listing of the target
+# looked like an empty target, and every source file became a copy over it.
 
 package require Tcl 8.6-
 
@@ -45,11 +50,24 @@ proc ::ctrlutils::cusync::compare {provL dirL provR dirR} {
     return $out
 }
 
-proc ::ctrlutils::cusync::_cmpDir {provL dirL provR dirR rel outVar} {
+# Entries of DIR as a dict name -> entry. A side whose directory does not
+# exist there (exists 0: the subtree is only on the other side) is empty; a
+# listing error of an existing directory is an error, not an empty side.
+proc ::ctrlutils::cusync::_entries {prov dir exists side} {
+    set out [dict create]
+    if {!$exists} { return $out }
+    if {[catch {$prov list $dir} entries]} {
+        return -code error -errorcode [list CTRLUTILS CUSYNC LIST $side $dir] \
+            "cannot list \"$dir\" ($side): $entries"
+    }
+    foreach e $entries { dict set out [dict get $e name] $e }
+    return $out
+}
+
+proc ::ctrlutils::cusync::_cmpDir {provL dirL provR dirR rel outVar {existsL 1} {existsR 1}} {
     upvar 1 $outVar out
-    set le [dict create] ; set re [dict create]
-    catch { foreach e [$provL list $dirL] { dict set le [dict get $e name] $e } }
-    catch { foreach e [$provR list $dirR] { dict set re [dict get $e name] $e } }
+    set le [_entries $provL $dirL $existsL L]
+    set re [_entries $provR $dirR $existsR R]
     set names [lsort -dictionary -unique [concat [dict keys $le] [dict keys $re]]]
     foreach n $names {
         set r [expr {$rel eq "" ? $n : "$rel/$n"}]
@@ -59,13 +77,13 @@ proc ::ctrlutils::cusync::_cmpDir {provL dirL provR dirR rel outVar} {
             lappend out [dict create rel $r name $n status onlyLeft ltype $t rtype ""]
             if {$t eq "dir"} {
                 # enumerate the left-only subtree so every file gets mirrored
-                _cmpDir $provL [_join $dirL $n] $provR [_join $dirR $n] $r out
+                _cmpDir $provL [_join $dirL $n] $provR [_join $dirR $n] $r out 1 0
             }
         } elseif {!$hasL && $hasR} {
             set t [dict get [dict get $re $n] type]
             lappend out [dict create rel $r name $n status onlyRight ltype "" rtype $t]
             if {$t eq "dir"} {
-                _cmpDir $provL [_join $dirL $n] $provR [_join $dirR $n] $r out
+                _cmpDir $provL [_join $dirL $n] $provR [_join $dirR $n] $r out 0 1
             }
         } else {
             set el [dict get $le $n] ; set er [dict get $re $n]
@@ -128,6 +146,18 @@ proc ::ctrlutils::cusync::plan {diffs direction} {
 # parent directories as needed. Returns {done N errors {msg ...}}. Optional
 # -onfile/-ondir callbacks get the rel path (for progress).
 proc ::ctrlutils::cusync::apply {srcProv srcDir dstProv dstDir actions args} {
+    # unknown options are an error naming the known ones, as in the other
+    # controllers (up to 2026-10-20 `array set` swallowed a typo like -onfiel)
+    if {[llength $args] % 2} {
+        return -code error -errorcode {CTRLUTILS CUSYNC OPTION} \
+            "missing value for option \"[lindex $args end]\""
+    }
+    foreach {k v} $args {
+        if {$k ni {-onfile -ondir}} {
+            return -code error -errorcode [list CTRLUTILS CUSYNC OPTION $k] \
+                "unknown option \"$k\"\nKnown: -onfile -ondir"
+        }
+    }
     array set o {-onfile "" -ondir ""}
     array set o $args
     set done 0 ; set errs {}
@@ -168,10 +198,19 @@ proc ::ctrlutils::cusync::applyOne {srcProv srcDir dstProv dstDir action} {
     if {[catch {$dstProv put $to $data} e]} {
         return [dict create ok 0 error "$rel (write): $e"]
     }
-    # Preserve source mtime (best-effort, local <-> local) so mirrors are
-    # idempotent; silently skipped for zip/dav/sftp targets.
-    catch {file mtime $to [file mtime $from]}
+    # Preserve source mtime (best-effort) so mirrors are idempotent. Only when
+    # both sides are the local provider: $from and $to are provider paths, and
+    # for a ZIP/DAV/SFTP side `file mtime` would read or touch a local file
+    # that merely has the same name.
+    if {[_isLocal $srcProv] && [_isLocal $dstProv]} {
+        catch {file mtime $to [file mtime $from]}
+    }
     return [dict create ok 1]
+}
+
+proc ::ctrlutils::cusync::_isLocal {prov} {
+    expr {![catch {info object class $prov} c] \
+        && $c eq "::tclutils::tuprovider::Local"}
 }
 
 # Parent of a "/"-path (works regardless of provider; forward-slash safe).
@@ -181,4 +220,4 @@ proc ::ctrlutils::cusync::_parent {p} {
     return [string range $p 0 [expr {$i - 1}]]
 }
 
-package provide ctrlutils::cusync 0.1
+package provide ctrlutils::cusync 0.3

@@ -447,4 +447,87 @@ test cufileops-9.3 {install: unknown option is an error that names the known one
     list [dict get $o -errorcode] [string match "*Known: -onop" $m]
 } -result {{CTRLUTILS CUFILEOPS OPTION -onpo} 1}
 
+test cufileops-10.1 {texts: English and formatted without a catalog} -constraints haveTk -body {
+    ::ctrlutils::cufileops::_ "Could not paste:\n%s" boom
+} -result "Could not paste:\nboom"
+
+test cufileops-10.2 {texts: an application catalog in ::ctrlutils wins} -constraints haveTk -setup {
+    package require msgcat
+    namespace eval ::ctrlutils {
+        ::msgcat::mcset {} "Delete file '%s'?" "Datei '%s' loeschen?"
+    }
+} -body {
+    ::ctrlutils::cufileops::_ "Delete file '%s'?" a.txt
+} -cleanup {
+    namespace eval ::ctrlutils {
+        ::msgcat::mcset {} "Delete file '%s'?" "Delete file '%s'?"
+    }
+} -result "Datei 'a.txt' loeschen?"
+
+test cufileops-12.1 {owSetApp switches the registry file and drops the cache} -body {
+    set saveFile $::ctrlutils::cufileops::owFile
+    set ::ctrlutils::cufileops::owFile ""
+    ::ctrlutils::cufileops::owSetApp dateiblick-test
+    set r [list [string match "*dateiblick-test*" [::ctrlutils::cufileops::_owFile]] \
+                $::ctrlutils::cufileops::owLoaded $::ctrlutils::cufileops::owCache]
+    lappend r [catch {::ctrlutils::cufileops::owSetApp "a b"}]
+    ::ctrlutils::cufileops::owSetApp explorer
+    set ::ctrlutils::cufileops::owFile $saveFile
+    set r
+} -result {1 0 {} 1}
+
+# forwards to the local provider; get fails for one path
+oo::class create FailGet {
+    variable P Bad
+    constructor {bad} { set P [::tclutils::tuprovider open local]; set Bad $bad }
+    method get {path} {
+        if {$path eq $Bad} { error "read error" }
+        $P get $path
+    }
+    method unknown {m args} { $P $m {*}$args }
+}
+
+test cufileops-13.1 {a failed item of a cut stays on the clipboard (0.6)} -constraints haveTk -setup {
+    set srcdir [file join $::tgt cutsrc2] ; file mkdir $srcdir
+    set dstdir [file join $::tgt cutdst2] ; file mkdir $dstdir
+    foreach n {a.txt b.txt} {
+        set fh [open [file join $srcdir $n] w] ; puts -nonewline $fh $n ; close $fh
+    }
+    set sp [FailGet new [file join $srcdir b.txt]]
+    set dp [::tclutils::tuprovider open local]
+    ::tkutils::tkufilelist::widget .c2s -provider $sp -dir $srcdir
+    ::tkutils::tkufilelist::widget .c2d -provider $dp -dir $dstdir
+    ::ctrlutils::cufileops::install c2s $sp .c2s {}
+    ::ctrlutils::cufileops::install c2d $dp .c2d {}
+    set ::ctrlutils::cufileops::clip {}
+    stubDlg
+} -body {
+    ::ctrlutils::cufileops::cut c2s \
+        [dict create name a.txt path [file join $srcdir a.txt] type file size 5] \
+        [dict create name b.txt path [file join $srcdir b.txt] type file size 5]
+    ::ctrlutils::cufileops::paste c2d
+    set clip $::ctrlutils::cufileops::clip
+    list [file exists [file join $dstdir a.txt]] [file exists [file join $srcdir a.txt]] \
+         [file exists [file join $srcdir b.txt]] [dict get $clip cut] \
+         [lmap i [dict get $clip items] {dict get $i name}] [llength $::dlgCalls]
+} -cleanup {
+    unstubDlg
+    destroy .c2s .c2d ; $sp destroy
+    file delete -force $srcdir $dstdir
+    set ::ctrlutils::cufileops::clip {}
+} -result {1 0 1 1 b.txt 1}
+
+test cufileops-13.2 {refresh runs the install script; unknown views are ignored (0.6)} -constraints haveTk -setup {
+    set p [::tclutils::tuprovider open local]
+    ::tkutils::tkufilelist::widget .rf -provider $p -dir $::tgt
+    ::ctrlutils::cufileops::install rfT $p .rf {incr ::refN}
+    set ::refN 0
+} -body {
+    ::ctrlutils::cufileops::refresh rfT
+    ::ctrlutils::cufileops::refresh gibtsnicht
+    set ::refN
+} -cleanup {
+    destroy .rf
+} -result 1
+
 cleanupTests

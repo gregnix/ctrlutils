@@ -1,4 +1,4 @@
-.TH cufileops n 0.2 ctrlutils
+.TH cufileops n 0.6 ctrlutils
 .SH ctrlutils::cufileops
 .PP
 A controller that adds capability\-driven file operations \-\- New Folder, Rename, Delete, Copy, Cut, Paste \-\- to a \fBtkufilelist\fR, via a right\-click context menu and keyboard shortcuts. It is not a widget: it wires behavior onto a list that already exists, and acts through a \fBtuprovider\fR, so what it offers depends on what the provider can do.
@@ -33,6 +33,7 @@ The context menu and shortcuts route to these (also callable directly):
 ::ctrlutils::cufileops::copy      $f ?$entry ...?   ;# one or more entries (multi-select)
 ::ctrlutils::cufileops::cut       $f ?$entry ...?
 ::ctrlutils::cufileops::paste     $f
+::ctrlutils::cufileops::refresh   $f            ;# run the refresh script of install (0.6)
 .CE
 .PP
 For a file the provider can read, the menu also offers \fBOpen\fR (launch the OS default application via \fBtclutils::tuopen\fR, falling back to xdg\-open/open/start) and \fBOpen with...\fR (prompt for a program and run it with the file). \fBOnly\fR\fB \fR\fBthe local filesystem provider\fR opens a path that already exists on disk. A ZIP or remote path that happens to exist locally is never used: bytes come from \fBget\fR and go into a process\-private directory (\fBcufileops\-<pid>\-…\fR under TMPDIR). That directory is removed when the process exits; leftover directories from crashed processes are removed on the next Open. Cut (the procedure or Ctrl+X) and Delete on a source without \fBdelete\fR show an error instead of doing nothing.
@@ -40,7 +41,7 @@ For a file the provider can read, the menu also offers \fBOpen\fR (launch the OS
 Shortcuts on the list: Delete, F2 (rename), Ctrl+C (copy), Ctrl+X (cut), Ctrl+V (paste).
 .SS "Dialogs belong to the view's window (0.2)"
 .PP
-Every prompt, confirmation and error dialog (New Folder, Rename, Delete, paste and open failures) is opened with \fB\-parent\fR set to the toplevel of the view's list, so it is transient to that window and centred over it. Up to 0.1 no dialog got a parent and \fBtkudialog\fR 0.1 put each one in the middle of the screen — with the Explorer on a second monitor, on the other one. Measured 2026\-09\-19: Explorer window at 860,560, the New Folder prompt centred over it. Needs \fBtkutils::tkudialog\fR 0.2.
+Every prompt, confirmation and error dialog (New Folder, Rename, Delete, paste and open failures) is opened with \fB\-parent\fR set to the toplevel of the view's list, so it is transient to that window and centred over it. Up to 0.1 no dialog got a parent and \fBtkudialog\fR 0.1 put each one in the middle of the screen — with the Explorer on a second monitor, on the other one. Measured 2026\-09\-19: Explorer window at 860,560, the New Folder prompt centred over it. Needs \fBtkutils::tkudialog\fR 0.3 and \fBtkutils::tkufilelist\fR 0.2.
 .SS Capability\-driven
 .PP
 Each menu entry appears only when the provider supports the underlying operation (\fBmkdir\fR / \fBmove\fR / \fBdelete\fR / \fBget\fR+\fBput\fR). A read\-only provider (a ZIP) offers none of the writing ones, so the UI never presents an action that would fail.
@@ -67,13 +68,31 @@ Registry API (pure, no Tk needed once loaded):
 ::ctrlutils::cufileops::owSetDefault $ext $cmd
 .CE
 .PP
-\fB$ext\fR is a lowercase extension with the dot (".txt"); a file with no extension uses the empty key. Set \fB::ctrlutils::cufileops::owApp\fR to change the config sub\-directory name, or \fBowFile\fR to point at an explicit file (tests do this).
+\fB$ext\fR is a lowercase extension with the dot (".txt"); a file with no extension uses the empty key.
+.PP
+The registry is stored per application name, by default \fBexplorer\fR. Each application sets its own, before the first "Open with":
+.CS
+::ctrlutils::cufileops::owSetApp dateiblick
+.CE
+.PP
+Without it every application using cufileops shares one registry. \fBowSetApp\fR also drops the cached copy (setting the variable \fBowApp\fR directly after the first access did not). \fBowFile\fR points at an explicit file (tests do this).
 .SS "Cross\-provider move (cut)"
 .PP
-Cut marks a file or folder for \fBmove\fR: the next paste writes it at the destination (the same \fBget\fR+\fBput\fR, recursive for folders) and then removes the source. Because it deletes the source, cut is only offered when the source provider supports \fBdelete\fR \-\- you cannot cut out of a read\-only ZIP (copy still works). The move is emitted as a single \fBmovex\fR operation record carrying both providers and a snapshot of the source, so undo restores the source and removes the target, and redo re\-applies the move. A cut is consumed by its paste.
+Cut marks a file or folder for \fBmove\fR: the next paste writes it at the destination (the same \fBget\fR+\fBput\fR, recursive for folders) and then removes the source. Because it deletes the source, cut is only offered when the source provider supports \fBdelete\fR \-\- you cannot cut out of a read\-only ZIP (copy still works). The move is emitted as a single \fBmovex\fR operation record carrying both providers and a snapshot of the source, so undo restores the source and removes the target, and redo re\-applies the move. A cut is consumed by its paste, except for the entries that could not be copied: they stay on the clipboard as a cut, so paste can be repeated (0.6; up to 0.5 the whole cut was gone). An entry copied but not removed at the source is reported and not kept; pasting it again would make a second copy.
 .SS "Cross\-provider copy"
 .PP
 Copy/Paste runs \fBget\fR+\fBput\fR at the controller level, not the provider's internal \fBcopy\fR, so it works \fBacross\fR providers: a file (or a whole directory, copied recursively) can be pulled out of a ZIP into a local directory. The clipboard remembers the \fIsource\fR provider, so pasting into a view backed by a different provider triggers the cross\-provider path. On a name collision, paste picks a free \fBname (copy).ext\fR rather than overwriting.
+.SS Language
+.PP
+Menu items, prompts and error messages go through \fBmsgcat\fR when it is loaded (since cufileops 0.5, cuundo 0.4). An application in another language sets them in the \fB::ctrlutils\fR namespace; messages with a detail take \fB%s\fR:
+.CS
+namespace eval ::ctrlutils {
+    ::msgcat::mcset {} Rename Umbenennen
+    ::msgcat::mcset {} "Could not rename:\n%s" "Umbenennen fehlgeschlagen:\n%s"
+}
+.CE
+.PP
+Without a catalog the texts stay English.
 .SS "See also"
 .PP
 \fBcumonitor\fR, \fBcufilter\fR, \fBcuundo\fR, \fBtclutils::tuprovider\fR, \fBtkutils::tkufilelist\fR

@@ -1,7 +1,7 @@
 # ctrlutils -- the controller layer
 
-Version **0.3** (see `CHANGELOG.md`). Recommended pairing: tclutils 0.64.0 +
-tkutils 0.46.0 + ctrlutils 0.3.
+Version **0.5** (see `CHANGELOG.md`). Recommended pairing: tclutils 0.69.0 +
+tkutils 0.49.0 + ctrlutils 0.5.
 
 ctrlutils is the third repo alongside `tclutils` and `tkutils`. It holds
 **controllers**: modules that wire events on existing widgets to operations on a
@@ -120,3 +120,9 @@ what keeps it non-destructive. `apply` executes the plan through the providers
 (`applyOne` runs a single action, so a UI can step through via `after` with a
 progress bar and Cancel). Because it works entirely through the provider
 interface, it mirrors across providers -- local, ZIP, WebDAV, SFTP.
+
+`same` means same size and same mtime; cusync does not compare contents. A
+directory that exists but cannot be listed is an error
+`{CTRLUTILS CUSYNC LIST side dir}`, not an empty side.
+
+Developed with the help of AI tools; the code is reviewed and tested by the author.

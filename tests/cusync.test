@@ -163,4 +163,77 @@ test cusync-3.5 {applyOne reports an error for a missing source, without throwin
     list [dict get $r ok] [expr {[dict exists $r error] && [dict get $r error] ne ""}]
 } -result {0 1}
 
+test cusync-3.6 {apply: an unknown option is an error that names the known ones} -body {
+    catch {::ctrlutils::cusync::apply $::PL /a $::PR /b {} -onfiel x} m o
+    list $m [dict get $o -errorcode]
+} -result [list "unknown option \"-onfiel\"\nKnown: -onfile -ondir" {CTRLUTILS CUSYNC OPTION -onfiel}]
+
+test cusync-3.7 {applyOne leaves a local file alone when the target is not the local provider} -setup {
+    # A minimal non-local target: it keeps written files in memory. A local
+    # file with the target path must not get the source's mtime.
+    oo::class create MemProv {
+        variable files
+        constructor {} { set files [dict create] }
+        method mkdir {p} {}
+        method put {p data} { dict set files $p $data }
+        method got {} { return $files }
+    }
+} -body {
+    lassign [makeTrees] base L R
+    set mem [MemProv new]
+    set to [file join $R onlyleft.txt]
+    set fh [open $to w]; puts $fh fremd; close $fh
+    file mtime $to 1234567
+    set r [::ctrlutils::cusync::applyOne $::PL $L $mem $R \
+              [dict create rel onlyleft.txt type file]]
+    set res [list [dict get $r ok] [dict exists [$mem got] $to] [file mtime $to]]
+    $mem destroy
+    file delete -force $base
+    set res
+} -cleanup {
+    MemProv destroy
+} -result {1 1 1234567}
+
+# A provider that forwards to the local one but cannot list one directory.
+oo::class create FailList {
+    variable P Bad
+    constructor {bad} { set P [::tclutils::tuprovider open local]; set Bad $bad }
+    method list {dir} {
+        if {$dir eq $Bad} { error "permission denied" }
+        $P list $dir
+    }
+    method unknown {m args} { $P $m {*}$args }
+}
+
+test cusync-4.1 {a listing error of the target is an error, not an empty side (0.3)} -body {
+    lassign [makeTrees] base L R
+    set pr [FailList new $R]
+    set rc [catch {::ctrlutils::cusync::compare $::PL $L $pr $R} m o]
+    $pr destroy
+    file delete -force $base
+    list $rc [lrange [dict get $o -errorcode] 0 3]
+} -result [list 1 {CTRLUTILS CUSYNC LIST R}]
+
+test cusync-4.2 {also for a subdirectory that exists on both sides} -body {
+    lassign [makeTrees] base L R
+    file mkdir [file join $R subdir]
+    set pl [FailList new [file join $L subdir]]
+    set rc [catch {::ctrlutils::cusync::compare $pl $L $::PR $R} m o]
+    $pl destroy
+    file delete -force $base
+    list $rc [lrange [dict get $o -errorcode] 0 2] [lindex [dict get $o -errorcode] 3]
+} -result {1 {CTRLUTILS CUSYNC LIST} L}
+
+test cusync-4.3 {a subtree only on one side is not listed on the other} -body {
+    lassign [makeTrees] base L R
+    set pr [FailList new [file join $R subdir]]
+    set s [dict create]
+    foreach d [::ctrlutils::cusync::compare $::PL $L $pr $R] {
+        dict set s [dict get $d rel] [dict get $d status]
+    }
+    $pr destroy
+    file delete -force $base
+    dict get $s subdir/nested.txt
+} -result onlyLeft
+
 cleanupTests
