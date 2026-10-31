@@ -105,16 +105,26 @@ proc ::ctrlutils::cufileops::_owLoad {} {
 }
 
 # Persist the registry dict, creating the config dir if needed. Returns 1 on
-# success, 0 on failure (the in-memory copy is updated either way).
+# success, 0 on failure (the in-memory copy is updated either way). Writes a
+# temporary file and renames it: a failed write keeps the old registry and
+# closes the channel (0.6; the file was emptied and the channel left open).
 proc ::ctrlutils::cufileops::_owSave {d} {
     variable owCache ; variable owLoaded
     set owCache $d ; set owLoaded 1
     set path [_owFile]
+    set tmp $path.tmp[pid]
+    set fh ""
     if {[catch {
         file mkdir [file dirname $path]
-        set fh [open $path w] ; fconfigure $fh -encoding utf-8
-        puts -nonewline $fh $d ; close $fh
-    }]} { return 0 }
+        set fh [open $tmp w] ; fconfigure $fh -encoding utf-8
+        puts -nonewline $fh $d
+        close $fh ; set fh ""
+        file rename -force $tmp $path
+    }]} {
+        if {$fh ne ""} { catch {close $fh} }
+        catch {file delete $tmp}
+        return 0
+    }
     return 1
 }
 

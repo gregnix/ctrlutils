@@ -23,6 +23,9 @@ When copying over an older tree, delete `ctrlutils-0.4.tm`, `cusync-0.2.tm`,
 - `cufilter`: a filter that cannot be applied marks the entry `invalid`,
   sends `<<CufilterError>>` and keeps the message for `lastError` (was
   caught silently). Tests `cufilter-10.1`, `10.2`.
+- `cufileops`: the "Open with" registry is written through a temporary
+  file; a failed write keeps the old registry and closes the channel (the
+  file was emptied, the channel left open). Test `cufileops-14.1`.
 - Docs: `cusync` `same` compares size and mtime, not contents.
 - Explorer: the messages for a missing `cusync` or `tkutlfind` name the
   module, not a file version (they said `cusync-0.2.tm`,

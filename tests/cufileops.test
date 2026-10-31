@@ -530,4 +530,28 @@ test cufileops-13.2 {refresh runs the install script; unknown views are ignored 
     destroy .rf
 } -result 1
 
+test cufileops-14.1 {a failed registry write keeps the old file, closes the channel (0.6)} -constraints haveTk -setup {
+    set f [file join [tcltest::temporaryDirectory] ow14.dict]
+    set fh [open $f w] ; puts -nonewline $fh PRECIOUS ; close $fh
+    set ::ctrlutils::cufileops::owFile $f
+    set ::ctrlutils::cufileops::owLoaded 0 ; set ::ctrlutils::cufileops::owCache ""
+    set before [llength [chan names file*]]
+    rename ::puts ::_realPuts
+    proc ::puts args {
+        if {[string match file* [lindex $args end-1]]} { error "disk full" }
+        ::_realPuts {*}$args
+    }
+} -body {
+    set rc [::ctrlutils::cufileops::_owSave {.txt {apps gedit}}]
+    rename ::puts {} ; rename ::_realPuts ::puts
+    set fh [open $f] ; set data [read $fh] ; close $fh
+    list $rc $data [expr {[llength [chan names file*]] - $before}] \
+        [llength [glob -nocomplain $f.tmp*]] [::ctrlutils::cufileops::owApps .txt]
+} -cleanup {
+    if {[llength [info commands ::_realPuts]]} { rename ::puts {} ; rename ::_realPuts ::puts }
+    file delete $f
+    set ::ctrlutils::cufileops::owFile ""
+    set ::ctrlutils::cufileops::owLoaded 0 ; set ::ctrlutils::cufileops::owCache ""
+} -result {0 PRECIOUS 0 0 gedit}
+
 cleanupTests
